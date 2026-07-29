@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "feedback": [
+    {
+      "candidate_id": "C001",
+      "title": "候选项目名称",
+      "label": "worth_deepening",
+      "reason": "它带来的机制可以改变我当前的记忆设计。",
+      "tags": ["时间记忆", "知识图谱", "可迁移机制"]
+    }
+  ]
+}

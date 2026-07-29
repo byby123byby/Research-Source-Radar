@@ -36,4 +36,8 @@ A release may claim convergence only after the frozen artifact, tool profile, re
 
 ## REQ-EVAL-009
 
-Comparative retrieval claims must use a frozen, paired, condition-isolated A/B protocol with identical prompts and budgets, condition-blind pooled source judgment, preregistered outcomes, task-level analysis, and explicit limits on generalization.
+Comparative retrieval claims must use a frozen, paired, condition-isolated A/B protocol with identical prompts and budgets, condition-blind pooled source judgment, preregistered outcomes, task-level analysis, and explicit limits on generalization. Known-lead evaluation must keep gold outside the treatment package and fail closed on contamination, incomplete pairs, or batch-level infrastructure blockers.
+
+## REQ-FEEDBACK-010
+
+When a user opts in to Research Radar feedback, the Skill must keep a visible, editable, Chinese-readable project profile of explicit labels and reasons; preserve an exploration share; and use the profile only to adjust future discovery and presentation, never to infer private browsing preferences, replace human value judgment, or bypass source identity and evidence gates.

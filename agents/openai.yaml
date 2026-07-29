@@ -1,4 +1,4 @@
 interface:
-  display_name: "Research Discovery and Translation Audit"
-  short_description: "Discover, verify, translate, and audit research"
-  default_prompt: "Use $research-discovery-and-translation-audit to search broadly, resolve any project, paper, screenshot, or short-video lead, expand it through independent repository and literature paths, verify sources through authoritative metadata, map mechanisms into this project, and report every unresolved identity or evidence gap before claiming completion."
+  display_name: "Research Source Radar"
+  short_description: "Find overlooked research that can move a project"
+  default_prompt: "Use $research-discovery-and-translation-audit to find overlooked but relevant papers and projects, verify identities with authoritative metadata, and explain direct use or mechanism transfer."

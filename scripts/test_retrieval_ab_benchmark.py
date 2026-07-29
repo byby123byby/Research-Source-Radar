@@ -18,6 +18,7 @@ import retrieval_ab_benchmark as ab
 
 SKILL_ROOT = Path(__file__).resolve().parents[1]
 TASK_FILE = SKILL_ROOT / "references" / "supervision-retrieval-ab-tasks.json"
+CROSS_DOMAIN_TASK_FILE = SKILL_ROOT / "references" / "cross-domain-discovery-tasks-v1.json"
 
 
 def benchmark_tasks():
@@ -42,14 +43,75 @@ def answer(source_suffix="baseline", relevance_text="useful"):
                 "title": f"Source {source_suffix}",
                 "url": f"https://github.com/example/{source_suffix}",
                 "source_type": "github_repository",
+                "role": "direct",
                 "relevance_rationale": relevance_text,
                 "mechanism": "bounded mechanism",
                 "limitations": "benchmark fixture",
+                "research_impact": "high",
+                "project_shift": "changes a project decision",
+                "mechanism_transfer": "direct",
+                "deployment_fit": "direct",
+                "next_experiment": "run a bounded comparison",
+                "popularity_signal": "none",
+                "popularity_evidence": [],
             }
         ],
         "queries": [{"query": f"query {source_suffix}", "source": "GitHub"}],
         "gaps": ["fixture gap"],
         "constraint_notes": ["fixture constraint"],
+        "discovery_trace": discovery_trace(),
+    }
+
+
+def discovery_trace(mode="used"):
+    return {
+        "mode": mode,
+        "route": "fast",
+        "attempted_families": ["task_decomposition", "mechanism_neighbor"],
+        "covered_families": ["task_decomposition"],
+        "uncovered_families": ["validation_or_failure"],
+        "budget_used": {"query_records": 2, "targeted_opens": 1, "gap_probes": 0},
+        "budget_remaining": {"query_records": 3, "targeted_opens": 0, "gap_probes": 1},
+        "contribution_map": {
+            "problem": "find research-moving sources",
+            "inputs": "user project and explicit seed constellation",
+            "mechanism": "mechanism and ecosystem expansion",
+            "outputs": "ranked candidates and transfer paths",
+            "constraints": "bounded search and identity verification",
+            "evidence": "canonical metadata and independent coverage",
+        },
+        "gap_matrix": [
+            {"family": "current", "status": "covered", "missing_atoms": [], "supporting_sources": ["S1"]}
+        ],
+        "next_query_reason": "probe the highest-value uncovered mechanism family",
+        "bridge_paths": [],
+        "self_refutation": {
+            "repeated_families": [],
+            "empty_cells": [],
+            "hard_negative": "a broad keyword match was excluded",
+            "transfer_risks": [],
+        },
+        "stop_evidence": "the coverage probe added no new identity-valid family",
+    }
+
+
+def exploration_item(title="Exploration lead"):
+    return {
+        "rank": 2,
+        "title": title,
+        "url": "https://github.com/example/exploration",
+        "source_type": "github_repository",
+        "role": "mechanism",
+        "relevance_rationale": "a concrete mechanism bridge",
+        "mechanism": "transferable mechanism",
+        "limitations": "requires adaptation",
+        "research_impact": "exploratory",
+        "project_shift": "tests a mechanism neighbor",
+        "mechanism_transfer": "adapt",
+        "deployment_fit": "partial",
+        "next_experiment": "run an isolated adaptation test",
+        "popularity_signal": "none",
+        "popularity_evidence": [],
     }
 
 
@@ -87,7 +149,7 @@ class RetrievalABBenchmarkTests(unittest.TestCase):
             model="test-model",
             reasoning_effort="high",
             max_wall_seconds=60,
-            max_sources=10,
+            max_sources=ab.DEFAULT_MAX_SOURCES,
         )
 
     def test_real_task_set_is_valid_and_has_frozen_sizes(self):
@@ -97,6 +159,15 @@ class RetrievalABBenchmarkTests(unittest.TestCase):
         self.assertEqual(8, len(data["task_sets"]["pilot"]))
         self.assertEqual(30, len(data["task_sets"]["main"]))
         self.assertEqual(list(ab.PRIMARY_METRICS), data["primary_metrics"])
+
+    def test_cross_domain_v3_task_set_is_valid_and_discipline_diverse(self):
+        data = ab.contract.load_json(CROSS_DOMAIN_TASK_FILE)
+        self.assertEqual([], ab.validate_tasks(data))
+        self.assertEqual("research-source-radar-cross-domain-v3-v1", data["benchmark_id"])
+        self.assertEqual(8, len(data["tasks"]))
+        self.assertEqual(4, len(data["task_sets"]["pilot"]))
+        self.assertEqual(8, len(data["task_sets"]["main"]))
+        self.assertGreaterEqual(len({item["category"] for item in data["tasks"]}), 3)
 
     def test_task_validation_rejects_schema_category_source_and_set_errors(self):
         data = small_tasks()
@@ -131,6 +202,9 @@ class RetrievalABBenchmarkTests(unittest.TestCase):
         self.assertEqual(8, len(trials))
         self.assertEqual(4, sum(item["condition"] == "baseline" for item in trials))
         self.assertEqual(4, sum(item["condition"] == "skill" for item in trials))
+        self.assertTrue(all("Return only JSON matching the provided response schema" in prompt for prompt in prompts_first.values()))
+        self.assertTrue(all("condition-specific search, ranking, or discovery behavior" in prompt for prompt in prompts_first.values()))
+        self.assertTrue(all("preserve at least one verified candidate in discovery_trace.exploration" not in prompt for prompt in prompts_first.values()))
         by_task = {}
         for trial in trials:
             by_task.setdefault((trial["task_id"], trial["repetition"]), set()).add(trial["prompt_sha256"])
@@ -166,6 +240,337 @@ class RetrievalABBenchmarkTests(unittest.TestCase):
         self.assertTrue(any("fields must be exactly" in item for item in errors))
         self.assertTrue(any("duplicate source rank" in item for item in errors))
         self.assertTrue(any("contiguous" in item for item in errors))
+
+    def test_answer_accepts_auditable_discovery_trace(self):
+        enriched = answer("enriched")
+        enriched["sources"][0].update(
+            {
+                "research_impact": "high",
+                "project_shift": "changes the candidate-generation protocol",
+                "mechanism_transfer": "adapt",
+                "deployment_fit": "partial",
+                "next_experiment": "blindly compare recovery at ten",
+                "popularity_signal": "triangulated",
+                "popularity_evidence": [
+                    {
+                        "kind": "github_activity",
+                        "url": "https://github.com/example/enriched",
+                        "claim": "unusual recent star growth",
+                        "independence_group": "repository activity",
+                    },
+                    {
+                        "kind": "technical_coverage",
+                        "url": "https://example.org/coverage",
+                        "claim": "substantive mechanism discussion",
+                        "independence_group": "independent technical coverage",
+                    },
+                ],
+            }
+        )
+        self.assertEqual([], ab.validate_answer(enriched))
+
+    def test_answer_uses_one_ranked_list_with_explicit_roles(self):
+        enriched = answer("mechanism")
+        enriched["sources"].append(exploration_item())
+        enriched["discovery_trace"] = discovery_trace()
+        self.assertEqual([], ab.validate_answer(enriched))
+        enriched["sources"][1]["role"] = "invalid"
+        self.assertTrue(any("role" in item for item in ab.validate_answer(enriched)))
+
+    def test_recovery_route_requires_family_and_budget_accounting(self):
+        enriched = answer("recovery")
+        enriched["queries"] = [
+            {"query": f"recovery query {index}", "source": "authoritative index"}
+            for index in range(1, 7)
+        ]
+        trace = discovery_trace()
+        trace.update({
+            "route": "recovery",
+            "attempted_families": ["task_decomposition", "mechanism_neighbor", "artifact_or_ecosystem", "validation_or_failure"],
+            "covered_families": ["task_decomposition", "mechanism_neighbor", "artifact_or_ecosystem"],
+            "uncovered_families": ["failure"],
+            "budget_used": {"query_records": 6, "targeted_opens": 1, "gap_probes": 1},
+            "budget_remaining": {"query_records": 0, "targeted_opens": 1, "gap_probes": 0},
+        })
+        enriched["discovery_trace"] = trace
+        self.assertEqual([], ab.validate_answer(enriched))
+
+        invalid = copy.deepcopy(enriched)
+        invalid["discovery_trace"].pop("attempted_families", None)
+        self.assertTrue(any("attempted_families" in error for error in ab.validate_answer(invalid)))
+
+    def test_recovery_route_rejects_a_seventh_gap_probe_query(self):
+        enriched = answer("recovery-budget-overrun")
+        enriched["queries"] = [
+            {"query": f"recovery query {index}", "source": "authoritative index"}
+            for index in range(1, 8)
+        ]
+        trace = discovery_trace()
+        trace.update({
+            "route": "recovery",
+            "budget_used": {"query_records": 7, "targeted_opens": 2, "gap_probes": 1},
+            "budget_remaining": {"query_records": 0, "targeted_opens": 0, "gap_probes": 0},
+        })
+        enriched["discovery_trace"] = trace
+        errors = ab.validate_answer(enriched)
+        self.assertTrue(any("query budget exceeds" in error for error in errors))
+        self.assertTrue(any("used-plus-actionable-remaining" in error for error in errors))
+
+    def test_recovery_route_rejects_query_trace_count_mismatch(self):
+        enriched = answer("recovery-trace-mismatch")
+        enriched["queries"] = [
+            {"query": f"recovery query {index}", "source": "authoritative index"}
+            for index in range(1, 7)
+        ]
+        trace = discovery_trace()
+        trace.update({
+            "route": "recovery",
+            "budget_used": {"query_records": 5, "targeted_opens": 1, "gap_probes": 0},
+            "budget_remaining": {"query_records": 1, "targeted_opens": 1, "gap_probes": 1},
+        })
+        enriched["discovery_trace"] = trace
+        self.assertTrue(any("count must equal" in error for error in ab.validate_answer(enriched)))
+
+    def test_recovery_route_allows_exhausted_dependent_gap_probe(self):
+        enriched = answer("recovery-dependent-budget")
+        enriched["queries"] = [
+            {"query": f"recovery query {index}", "source": "authoritative index"}
+            for index in range(1, 7)
+        ]
+        trace = discovery_trace()
+        trace.update({
+            "route": "recovery",
+            "budget_used": {"query_records": 6, "targeted_opens": 2, "gap_probes": 0},
+            "budget_remaining": {"query_records": 0, "targeted_opens": 0, "gap_probes": 0},
+        })
+        enriched["discovery_trace"] = trace
+        self.assertEqual([], ab.validate_answer(enriched))
+
+    def test_response_schema_requires_all_recovery_budget_counters(self):
+        schema = ab.response_schema()
+        trace = schema["properties"]["discovery_trace"]
+        for field in ("budget_used", "budget_remaining"):
+            budget = trace["properties"][field]
+            self.assertEqual(
+                ["query_records", "targeted_opens", "gap_probes"],
+                budget["required"],
+            )
+
+    def test_blind_pool_and_metrics_use_roles_inside_one_list(self):
+        manifest, _ = self.prepared()
+        responses = []
+        for trial in manifest["trials"]:
+            enriched = answer(f"{trial['condition']}-{trial['task_id']}")
+            enriched["discovery_trace"] = discovery_trace()
+            neighbor = exploration_item(f"neighbor-{trial['condition']}-{trial['task_id']}")
+            neighbor["url"] = f"https://github.com/example/neighbor-{trial['condition']}-{trial['task_id']}"
+            enriched["sources"].append(neighbor)
+            responses.append(response_for(trial, enriched))
+        pool = ab.build_blind_pool(small_tasks(), manifest, responses)
+        self.assertEqual(8, len(pool["items"]))
+        for item in pool["items"]:
+            item["relevance"] = 2
+            item["identity_valid"] = "valid"
+            item["constraint_fit"] = 1
+        metrics = ab.score_benchmark(manifest, responses, pool, iterations=20, seed=4)
+        self.assertEqual(1.0, metrics["condition_summary"]["skill"]["exploration_source_count"])
+        self.assertEqual(1.0, metrics["condition_summary"]["skill"]["exploration_valid_high_relevance_sources"])
+
+    def test_quality_metrics_score_unified_list_and_role_subsets(self):
+        manifest, _ = self.prepared()
+        trial = manifest["trials"][0]
+        result = answer("union")
+        result["discovery_trace"] = discovery_trace()
+        result["sources"].append(exploration_item("neighbor"))
+        response = response_for(trial, result)
+        primary = result["sources"][0]
+        neighbor = result["sources"][1]
+        judgments = {
+            (trial["task_id"], ab.normalized_source_key(primary["url"], primary["title"], primary["source_type"])): {
+                "relevance": 1,
+                "identity_valid": "valid",
+                "constraint_fit": 1,
+            },
+            (trial["task_id"], ab.normalized_source_key(neighbor["url"], neighbor["title"], neighbor["source_type"])): {
+                "relevance": 2,
+                "identity_valid": "valid",
+                "constraint_fit": 1,
+            },
+        }
+        metrics = ab.trial_metrics(response, judgments)
+        self.assertEqual(2.0, metrics["discovery_valid_relevant_sources"])
+        self.assertEqual(1.0, metrics["valid_high_relevance_sources"])
+
+    def test_active_trace_rejects_malformed_trace_and_over_budget_queries(self):
+        malformed = answer("malformed")
+        malformed["discovery_trace"] = discovery_trace()
+        del malformed["discovery_trace"]["stop_evidence"]
+        self.assertTrue(any("stop_evidence" in item for item in ab.validate_answer(malformed)))
+        over_budget = answer("over-budget")
+        over_budget["discovery_trace"] = discovery_trace()
+        over_budget["queries"] = [
+            {"query": f"query {index}", "source": "web"} for index in range(ab.ACTIVE_LOOP_MAX_QUERIES + 1)
+        ]
+        self.assertTrue(any("active discovery loop budget" in item for item in ab.validate_answer(over_budget)))
+
+    def test_prepared_prompt_declares_trace_contract(self):
+        prompt = ab.build_prompt(small_tasks()["tasks"][0], "2026-07-16", 10)
+        self.assertIn("discovery_trace", prompt)
+        self.assertIn("at most 8 distinct query records", prompt)
+
+    def test_recovery_benchmark_prompt_freezes_the_treatment_route(self):
+        prompt = ab.build_prompt(
+            small_tasks()["tasks"][0],
+            "2026-07-16",
+            6,
+            recovery_route_required=True,
+        )
+        self.assertIn("use mode=used and route=recovery", prompt)
+        self.assertIn("baseline has no installed Skill", prompt)
+        recovery_cap = ab.PROFILE_CONTRACTS["recovery"]["budget"]["query_records"]
+        self.assertIn(f"at most {recovery_cap} distinct query records", prompt)
+
+    def test_recovery_benchmark_rejects_condition_route_drift(self):
+        skill_answer = answer("skill-route-drift")
+        self.assertTrue(any(
+            "route=recovery" in error
+            for error in ab.validate_treatment_trace(
+                skill_answer,
+                condition="skill",
+                benchmark_id="research-source-radar-cross-domain-v3-v1",
+            )
+        ))
+        baseline_answer = answer("baseline-mode-drift")
+        self.assertTrue(any(
+            "mode=not_used" in error
+            for error in ab.validate_treatment_trace(
+                baseline_answer,
+                condition="baseline",
+                benchmark_id="research-source-radar-cross-domain-v3-v1",
+            )
+        ))
+
+    def test_response_schema_requires_unified_roles_and_family_trace(self):
+        trace = ab.response_schema()["properties"]["discovery_trace"]
+        source = ab.response_schema()["properties"]["sources"]["items"]
+        self.assertIn("role", source["required"])
+        self.assertEqual(set(ab.SOURCE_ROLES), set(source["properties"]["role"]["enum"]))
+        self.assertNotIn("exploration", trace["properties"])
+        for field in (
+            "route",
+            "attempted_families",
+            "covered_families",
+            "uncovered_families",
+            "budget_used",
+            "budget_remaining",
+        ):
+            self.assertIn(field, trace["required"])
+
+    def test_condition_schema_is_identical_for_baseline_and_skill(self):
+        baseline = ab.trial_response_schema("baseline")
+        skill = ab.trial_response_schema("skill")
+        self.assertEqual(baseline, skill)
+
+    def test_live_preflight_accepts_current_skill_contract(self):
+        result = ab.run_live_preflight(SKILL_ROOT)
+        self.assertEqual("PASS", result["status"])
+        self.assertRegex(result["contract_fingerprint"], r"^[0-9a-f]{64}$")
+
+    def test_live_preflight_blocks_failed_report(self):
+        failed = subprocess.CompletedProcess(
+            args=["preflight"],
+            returncode=1,
+            stdout=json.dumps({"status": "FAIL", "checks": [{"name": "schema", "status": "fail"}]}),
+            stderr="",
+        )
+        with mock.patch.object(ab.subprocess, "run", return_value=failed):
+            with self.assertRaisesRegex(ValueError, "live run blocked"):
+                ab.run_live_preflight(SKILL_ROOT)
+
+    def test_live_preflight_timeout_blocks_execution(self):
+        with mock.patch.object(ab.subprocess, "run", side_effect=subprocess.TimeoutExpired("preflight", 30)):
+            with self.assertRaisesRegex(ValueError, "timed out; live run blocked"):
+                ab.run_live_preflight(SKILL_ROOT)
+
+    def test_normalization_deduplicates_caps_and_reranks_equally(self):
+        value = answer("normalize")
+        value["sources"] = []
+        for index in range(1, 9):
+            source = copy.deepcopy(answer(f"source-{index}")["sources"][0])
+            source["rank"] = index + 10
+            value["sources"].append(source)
+        duplicate = copy.deepcopy(value["sources"][0])
+        duplicate["rank"] = 99
+        value["sources"].insert(1, duplicate)
+        normalized, diagnostics = ab.normalize_answer(value, max_sources=6)
+        self.assertEqual(6, len(normalized["sources"]))
+        self.assertEqual(list(range(1, 7)), [source["rank"] for source in normalized["sources"]])
+        self.assertEqual(1, diagnostics["deduplicated_source_count"])
+        self.assertEqual(2, diagnostics["capped_source_count"])
+        self.assertTrue(diagnostics["applied"])
+        self.assertEqual([], ab.validate_answer(normalized, max_sources=6))
+
+    def test_validator_uses_manifest_source_limit(self):
+        value = answer("limit")
+        for index in range(2, 7):
+            source = copy.deepcopy(value["sources"][0])
+            source["rank"] = index
+            source["title"] = f"Source {index}"
+            source["url"] = f"https://github.com/example/source-{index}"
+            value["sources"].append(source)
+        self.assertEqual([], ab.validate_answer(value, max_sources=6))
+        self.assertTrue(any("at most 4" in item for item in ab.validate_answer(value, max_sources=4)))
+
+    def test_error_tail_prioritizes_validation_diagnostics_over_event_noise(self):
+        rendered = ab.safe_error_tail("event-noise " * 500, "invalid final answer: missing trace")
+        self.assertIn("invalid final answer", rendered)
+
+    def test_global_execution_blocker_only_matches_batch_level_quota_failures(self):
+        quota = {
+            "execution": {
+                "status": "failed",
+                "error": "You've hit your usage limit. Purchase more credits.",
+            }
+        }
+        timeout = {"execution": {"status": "failed", "error": "trial exceeded hard timeout"}}
+        completed = {"execution": {"status": "completed", "error": "quota exceeded"}}
+        self.assertEqual("account_usage_limit", ab.global_execution_blocker(quota))
+        self.assertIsNone(ab.global_execution_blocker(timeout))
+        self.assertIsNone(ab.global_execution_blocker(completed))
+
+    def test_holdout_contamination_gate_finds_canonical_identifier_only(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            skill = root / "skill"
+            skill.mkdir()
+            gold = root / "gold.json"
+            gold.write_text(
+                json.dumps({"lead_sets": {"TASK-1": [{"id": "hidden-tool", "aliases": ["hidden tool"]}]}}),
+                encoding="utf-8",
+            )
+            (skill / "SKILL.md").write_text("Use hidden-tool for this task.\n", encoding="utf-8")
+            self.assertEqual(["SKILL.md: hidden-tool"], ab.find_holdout_leaks(skill, gold))
+            (skill / "SKILL.md").write_text("Use unrelated methods.\n", encoding="utf-8")
+            self.assertEqual([], ab.find_holdout_leaks(skill, gold))
+
+    def test_stage_treatment_excludes_real_holdout_from_runtime_package(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "treatment"
+            args = Namespace(
+                source_skill=str(SKILL_ROOT),
+                output=str(output),
+                holdout_gold=str(SKILL_ROOT / "references" / "user-aligned-recovery-gold-v1.json"),
+            )
+            self.assertEqual(0, ab.command_stage_treatment(args))
+            self.assertTrue((output / "SKILL.md").is_file())
+            self.assertFalse((output / "references" / "user-aligned-recovery-gold-v1.json").exists())
+            self.assertEqual(
+                [],
+                ab.find_holdout_leaks(
+                    output,
+                    SKILL_ROOT / "references" / "user-aligned-recovery-gold-v1.json",
+                ),
+            )
 
     def test_response_must_match_manifest_and_failed_response_cannot_contain_answer(self):
         manifest, _ = self.prepared()

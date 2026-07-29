@@ -12,6 +12,7 @@ The bundled script creates and validates a JSON contract using only the Python s
 - [Structured evidence references](#structured-evidence-references)
 - [Candidate status and review depth](#candidate-status-and-review-depth)
 - [Mechanism decisions](#mechanism-decisions)
+- [Source-to-target translation completeness](#source-to-target-translation-completeness)
 - [Mode-specific floors](#mode-specific-floors)
 - [Commands and semantics](#commands-and-semantics)
 
@@ -28,10 +29,11 @@ The bundled script creates and validates a JSON contract using only the Python s
 - `query_families`: conceptually independent searches containing exact per-source executions.
 - `record_management`: record counts, deduplication method, exclusion counts, and flow evidence.
 - `search_quality`: search-strategy peer review and publication/correction/retraction status checks.
-- `trend_discovery`: optional time-bounded popularity/emergence sweep with independent sources, exact queries, candidate-linked signals, triangulation, and a fixed `discovery_only` evidence policy.
+- `trend_discovery`: optional time-bounded popularity/emergence sweep. New contracts use `protocol: ecosystem-v1` with selected `ecosystem_profiles` and explicit `time_horizons`; legacy v2 trend records remain readable under `protocol: legacy`.
 - `chaining`: backward, forward, related-project, author/organization, benchmark/competitor, and failure/correction paths.
 - `candidates`: source ledger with controlled artifact type, authoritative identity, verified source snapshot, review depth, fit, decision, and rationale.
 - `mechanisms`: atomic claims/mechanisms and source-to-artifact evidence.
+- `translation_matrix`: per-source mechanism-level mapping records for target project integration.
 - `gaps`, `stop_rule`, `coverage_statement`: residual uncertainty and bounded completion claim.
 
 ## User-shared seed provenance
@@ -103,14 +105,21 @@ Technical coverage may additionally use `technical_blog`, `community_discussion`
 
 ## Emerging and popular-source signals
 
-A completed `trend_discovery` records:
+A completed `trend_discovery` using `protocol: ecosystem-v1` records:
 
-- `window_days` and an operational `definition` of popularity or emergence;
+- `ecosystem_profiles`: one or more discipline-specific discovery ecosystems;
+- `time_horizons`: at least one finite recent window and one `foundational` window with `window_days: null`;
+- `window_days` and an operational `definition` of popularity or emergence for the active observation window;
 - at least two independent `sources`, each with an explicit `independence_group`, interface, exact query/feed, search time, result count, and observed evidence;
 - one or more `signals`, each with a stable ID, linked candidate ID, source, controlled signal type, value, observation time, and evidence;
 - optional `claims` such as `emerging` or `popular`; every claim binds one candidate to at least two signals from different independence groups and states a boundary;
 - a `triangulation_rule`;
 - `evidence_policy: discovery_only`.
+
+The finite window may be 7, 30, or 180 days, but the contract must retain the
+label and cutoff rather than calling a result simply “latest.” The foundational
+lane is not a popularity claim; it preserves older mechanisms that remain
+important. These fields keep “recent and hot” separate from “old but useful.”
 
 Supported signal types include repository velocity, release activity, package/model adoption, technical-blog frequency, community attention, curated/newsletter visibility, benchmark visibility, search interest, and `other`. A candidate discovered this way records `trend:<signal-id>` in `discovered_via`; validation binds that route to a completed signal for the same candidate. Signal popularity cannot satisfy mechanism evidence or source-quality requirements.
 
@@ -168,7 +177,27 @@ An included/adapted candidate must have verified identity, deep review, and at l
 
 Use `adopt`, `adapt`, `represented`, `defer`, `reject`, or `unverified`. An adaptation must not be reported as a reproduction.
 
+For `adopt`, `adapt`, and `represented`, the mechanism must also provide the translation completeness fields required in the new section below.
+
 For `implemented` or `validated` work, record the artifact, decision effect, positive test, failure/falsification test, audit evidence, and claim boundary. Non-software evidence may point to a protocol, instrument, experimental control, preregistered analysis, participant verification, or ethics safeguard.
+
+## Source-to-target translation completeness
+
+Before reporting a migration claim, every `implemented` or `validated` mechanism must have an attached completeness record with:
+
+- `source_scope`: what was read (论文、README、实现代码、配置、评测、版本记录、约束）；
+- `translation_status`: `direct_use`, `adapted`, `rejected`, or `not_reviewed`；
+- `state_variables`: explicit key state/parameter variables and assumptions used in the mechanism；
+- `update_rules`: state transition/update rules or equations used in operation；
+- `constraints`: runtime/platform/data/伦理/合规/成本约束；
+- `failure_modes`: known failures, negative cases, fallback strategies；
+- `target_mapping`: where in the target system this mechanism is mapped；
+- `test_plans`: at least one positive test plan and one failure or falsification check；
+- `artifact_reference`: artifact or test artifact that demonstrates the mapped claim；
+- `claim_boundary`: explicit limit where the mechanism transfer stops being valid；
+- `migration_reason`: why adopted, adapted, or rejected, and the impact on the original claim.
+
+If any row remains `not_reviewed`, the final status for migration completion must not be "completed"; keep the row in `not_reviewed`/`open_questions` and expose it in the residual risk statement.
 
 ## Mode-specific floors
 

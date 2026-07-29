@@ -7,6 +7,7 @@ import argparse
 import copy
 import difflib
 import hashlib
+import html
 import http.client
 import ipaddress
 import json
@@ -24,6 +25,7 @@ import urllib.parse
 import urllib.request
 import xml.parsers.expat as expat
 from datetime import date, datetime, timedelta, timezone
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any, cast
 
@@ -57,6 +59,7 @@ PROFILES = {
     "health-clinical",
     "human-subjects-social-science",
     "experimental-science-engineering",
+    "financial-quantitative",
     "education",
     "law-policy",
     "business-management",
@@ -95,6 +98,7 @@ CANDIDATE_TYPES = {
 }
 TREND_REQUIREMENTS = {"not_requested", "monitor", "required"}
 TREND_STATUSES = {"pending", "completed", "not_applicable", "blocked"}
+TREND_PROTOCOLS = {"legacy", "ecosystem-v1"}
 TREND_SIGNAL_TYPES = {
     "repository_velocity",
     "release_activity",
@@ -308,7 +312,10 @@ def template(project: str, question: str, profile: str, mode: str = "full") -> d
         "trend_discovery": {
             "status": "not_applicable",
             "reason": "No popularity or emerging-topic sweep was requested.",
+            "protocol": "ecosystem-v1",
             "window_days": 90,
+            "ecosystem_profiles": [],
+            "time_horizons": [],
             "definition": "",
             "sources": [],
             "signals": [],
@@ -1434,6 +1441,56 @@ def validate_contract(data: Any, base_path: Path | None = None) -> Findings:
     if is_choice(trend_status, {"not_applicable", "blocked"}):
         require(nonempty_string(trend.get("reason")), f, "trend_discovery.reason is required when not completed")
     if trend_status == "completed":
+        protocol = trend.get("protocol", "legacy")
+        require(is_choice(protocol, TREND_PROTOCOLS), f, "trend_discovery.protocol is invalid")
+        if protocol == "ecosystem-v1":
+            ecosystem_profiles = validate_string_list(
+                trend.get("ecosystem_profiles"),
+                f,
+                "trend_discovery.ecosystem_profiles",
+                require_items=True,
+            )
+            for profile_index, profile in enumerate(ecosystem_profiles):
+                require(
+                    profile in PROFILES,
+                    f,
+                    f"trend_discovery.ecosystem_profiles[{profile_index}] is unsupported",
+                )
+            horizons = expect_list(trend.get("time_horizons"), f, "trend_discovery.time_horizons")
+            require(bool(horizons), f, "completed trend discovery requires time_horizons")
+            horizon_ids: set[str] = set()
+            has_finite_horizon = False
+            has_foundational_horizon = False
+            for horizon_index, raw_horizon in enumerate(horizons):
+                horizon_path = f"trend_discovery.time_horizons[{horizon_index}]"
+                horizon = expect_dict(raw_horizon, f, horizon_path)
+                horizon_id = horizon.get("id")
+                require(nonempty_string(horizon_id), f, f"{horizon_path}.id must be a non-empty string")
+                if isinstance(horizon_id, str) and horizon_id.strip():
+                    require(bool(STABLE_ID_PATTERN.fullmatch(horizon_id)), f, f"{horizon_path}.id must be a stable identifier")
+                    normalized_horizon_id = horizon_id.casefold()
+                    if normalized_horizon_id in horizon_ids:
+                        f.error(f"duplicate trend time horizon id: {horizon_id}")
+                    horizon_ids.add(normalized_horizon_id)
+                require(nonempty_string(horizon.get("label")), f, f"{horizon_path}.label must be a non-empty string")
+                require(nonempty_string(horizon.get("role")), f, f"{horizon_path}.role must be a non-empty string")
+                days = horizon.get("window_days")
+                if days is None:
+                    has_foundational_horizon = True
+                    require(
+                        horizon.get("role") == "foundational",
+                        f,
+                        f"{horizon_path} with null window_days must have role foundational",
+                    )
+                else:
+                    has_finite_horizon = True
+                    require(
+                        isinstance(days, int) and not isinstance(days, bool) and 1 <= days <= 3660,
+                        f,
+                        f"{horizon_path}.window_days must be null or an integer between 1 and 3660",
+                    )
+            require(has_finite_horizon, f, "completed trend discovery requires a finite recent time horizon")
+            require(has_foundational_horizon, f, "completed trend discovery requires a foundational time horizon")
         window_days = trend.get("window_days")
         require(
             isinstance(window_days, int) and not isinstance(window_days, bool) and 1 <= window_days <= 3660,
@@ -1628,8 +1685,12 @@ def validate_contract(data: Any, base_path: Path | None = None) -> Findings:
             )
         if is_choice(decision, {"adopt", "adapt"}):
             require(nonempty_string(mechanism.get("translation")), f, f"{prefix}.translation must be a non-empty string")
+            for key in ("state_variables", "update_rules", "failure_modes", "constraints", "target_mapping", "verification_plan"):
+                require(nonempty_string(mechanism.get(key)), f, f"{prefix}.{key} is required for adopt/adapt")
         if is_choice(implementation_status, {"implemented", "validated"}):
             require(nonempty_string(mechanism.get("decision_effect")), f, f"{prefix}.decision_effect must be a non-empty string")
+            for key in ("translation", "state_variables", "update_rules", "failure_modes", "target_mapping", "verification_plan", "artifact_reference"):
+                require(nonempty_string(mechanism.get(key)), f, f"{prefix}.{key} is required for implemented/validated work")
             minimum_status = "verified" if implementation_status == "validated" else "observed"
             for key in ("artifact", "positive_test", "failure_test", "audit_evidence"):
                 validate_evidence_ref(
@@ -2479,6 +2540,50 @@ def fetch_public_https_bytes(
     raise ValueError(f"too many redirects for {url}")
 
 
+class PageMetadataParser(HTMLParser):
+    """Extract bounded publisher metadata without executing page content."""
+
+    TITLE_KEYS = ("citation_title", "dc.title", "dcterms.title", "og:title", "twitter:title")
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self._in_title = False
+        self._title_parts: list[str] = []
+        self._metadata: dict[str, str] = {}
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        lowered = tag.casefold()
+        if lowered == "title":
+            self._in_title = True
+            return
+        if lowered != "meta":
+            return
+        fields = {key.casefold(): (value or "") for key, value in attrs}
+        key = (fields.get("name") or fields.get("property") or fields.get("itemprop") or "").casefold()
+        content = fields.get("content", "")
+        if key in self.TITLE_KEYS and content and key not in self._metadata:
+            self._metadata[key] = content[:MAX_TITLE_CHARS]
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag.casefold() == "title":
+            self._in_title = False
+
+    def handle_data(self, data: str) -> None:
+        if self._in_title and sum(len(part) for part in self._title_parts) < MAX_TITLE_CHARS:
+            self._title_parts.append(data[:MAX_TITLE_CHARS])
+
+    @staticmethod
+    def _clean(value: str) -> str:
+        return re.sub(r"\s+", " ", html.unescape(value)).strip()[:MAX_TITLE_CHARS]
+
+    def best_title(self) -> str:
+        for key in self.TITLE_KEYS:
+            title = self._clean(self._metadata.get(key, ""))
+            if title:
+                return title
+        return self._clean("".join(self._title_parts))
+
+
 def verify_official_url(value: str, timeout: float) -> dict[str, Any]:
     ensure_public_http_url(value)
     body, final_url, status = fetch_bytes(
@@ -2491,9 +2596,16 @@ def verify_official_url(value: str, timeout: float) -> dict[str, Any]:
     canonical_url = canonical_public_https_url(final_url)
     ensure_public_http_url(canonical_url)
     sample = body[:200_000].decode("utf-8", errors="ignore")
-    title_match = re.search(r"<title[^>]*>(.*?)</title>", sample, re.I | re.S)
+    parser = PageMetadataParser()
+    try:
+        parser.feed(sample)
+        parser.close()
+    except (ValueError, AssertionError):
+        # Malformed publisher HTML must not break identity filtering. Falling
+        # back to the host leaves the source unresolved by the stricter gate.
+        pass
     final_host = urllib.parse.urlparse(canonical_url).hostname or ""
-    title = re.sub(r"\s+", " ", title_match.group(1)).strip() if title_match else ""
+    title = parser.best_title()
     if not title:
         title = final_host
     return {
@@ -2511,6 +2623,7 @@ def verify_candidate_source(
     timeout: float,
     *,
     allow_official_url: bool = False,
+    require_title_match: bool = True,
 ) -> dict[str, Any]:
     identity = candidate.get("source_identity")
     if not isinstance(identity, dict):
@@ -2549,11 +2662,13 @@ def verify_candidate_source(
         result["title_match"] = score
         normalized_candidate = normalized_text(candidate_title)
         normalized_aliases = {normalized_text(alias) for alias in aliases if normalized_text(alias)}
-        if not normalized_candidate or normalized_candidate not in normalized_aliases:
+        if require_title_match and (not normalized_candidate or normalized_candidate not in normalized_aliases):
             result["status"] = "failed"
             result["evidence"] = f"{verified['evidence']}; title mismatch score={score:.4f}"
         else:
             result["status"] = "verified"
+            if not require_title_match:
+                result["evidence"] = f"{verified['evidence']}; source identity verified"
     except ValueError as exc:
         result.update({
             "status": "failed",
@@ -3081,7 +3196,10 @@ def render_contract(data: dict[str, Any]) -> str:
         "### Emerging and popular-source signals",
         "",
         f"- Requirement: {markdown_cell(scope.get('trend_requirement', 'not_requested'))}",
+        f"- Protocol: {markdown_cell(trend.get('protocol', 'legacy'))}",
         f"- Status/window: {markdown_cell(trend.get('status'))}; {markdown_cell(trend.get('window_days'))} days",
+        f"- Ecosystem profiles: {markdown_cell(', '.join(str(item) for item in list_or_empty(trend.get('ecosystem_profiles'))))}",
+        f"- Time horizons: {markdown_cell('; '.join(str(item.get('label')) + '=' + str(item.get('window_days')) for item in list_or_empty(trend.get('time_horizons')) if isinstance(item, dict)))}",
         f"- Operational definition: {markdown_cell(trend.get('definition'))}",
         f"- Evidence policy: {markdown_cell(trend.get('evidence_policy'))}",
         f"- Triangulation: {markdown_cell(trend.get('triangulation_rule'))}",

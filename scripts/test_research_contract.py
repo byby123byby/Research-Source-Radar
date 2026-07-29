@@ -6,6 +6,7 @@ import io
 import os
 import random
 import re
+import shutil
 import stat
 import sys
 import tempfile
@@ -23,6 +24,16 @@ import install_skill as installer
 
 CHECKED_AT = "2020-01-01T00:00:00+00:00"
 SKILL_ROOT = Path(__file__).resolve().parents[1]
+
+
+def skill_documentation() -> str:
+    """Read the compact entry point plus deferred operational manual."""
+    return "\n".join(
+        (
+            (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8"),
+            (SKILL_ROOT / "references" / "operational-manual-v3.md").read_text(encoding="utf-8"),
+        )
+    )
 
 
 def evidence(locator: str, *, kind: str = "url", status: str = "observed"):
@@ -209,7 +220,13 @@ class ResearchContractTests(unittest.TestCase):
         return {
             "status": "completed",
             "reason": "",
+            "protocol": "ecosystem-v1",
             "window_days": 30,
+            "ecosystem_profiles": ["computing-software"],
+            "time_horizons": [
+                {"id": "recent_6m", "label": "recent_6m", "window_days": 180, "role": "recent_activity"},
+                {"id": "foundational", "label": "foundational", "window_days": None, "role": "foundational"},
+            ],
             "definition": "Recent release activity or repeated independent technical coverage within 30 days.",
             "sources": [
                 {
@@ -316,6 +333,41 @@ class ResearchContractTests(unittest.TestCase):
         data = rc.template("Example", "Question?", "computing-software")
         self.assertEqual("not_requested", data["scope"]["trend_requirement"])
         self.assertEqual("not_applicable", data["trend_discovery"]["status"])
+        self.assertEqual("ecosystem-v1", data["trend_discovery"]["protocol"])
+        self.assertEqual([], data["trend_discovery"]["ecosystem_profiles"])
+        self.assertEqual([], data["trend_discovery"]["time_horizons"])
+
+    def test_legacy_completed_trend_remains_valid_without_ecosystem_fields(self):
+        data = valid_contract()
+        data["scope"]["trend_requirement"] = "required"
+        data["trend_discovery"] = self.completed_trend_discovery()
+        data["trend_discovery"]["protocol"] = "legacy"
+        data["trend_discovery"].pop("ecosystem_profiles")
+        data["trend_discovery"].pop("time_horizons")
+        findings = rc.validate_contract(data)
+        self.assertEqual([], findings.errors)
+
+    def test_completed_trend_requires_ecosystem_and_foundational_horizon(self):
+        data = valid_contract()
+        data["scope"]["trend_requirement"] = "required"
+        data["trend_discovery"] = self.completed_trend_discovery()
+        data["trend_discovery"].pop("ecosystem_profiles")
+        data["trend_discovery"]["time_horizons"] = [
+            {"id": "recent", "label": "recent", "window_days": 180, "role": "recent_activity"}
+        ]
+        findings = rc.validate_contract(data)
+        self.assertTrue(any("ecosystem_profiles" in item for item in findings.errors))
+        self.assertTrue(any("foundational time horizon" in item for item in findings.errors))
+
+    def test_completed_trend_rejects_unknown_ecosystem_and_invalid_horizon(self):
+        data = valid_contract()
+        data["scope"]["trend_requirement"] = "required"
+        data["trend_discovery"] = self.completed_trend_discovery()
+        data["trend_discovery"]["ecosystem_profiles"] = ["not-a-discipline"]
+        data["trend_discovery"]["time_horizons"][1]["window_days"] = 0
+        findings = rc.validate_contract(data)
+        self.assertTrue(any("ecosystem_profiles[0] is unsupported" in item for item in findings.errors))
+        self.assertTrue(any("window_days must be null" in item for item in findings.errors))
 
     def test_required_trend_sweep_must_be_completed(self):
         data = valid_contract()
@@ -632,6 +684,11 @@ class ResearchContractTests(unittest.TestCase):
             "references/domain-profiles.md",
             "references/discovery-protocol.md",
             "references/seed-to-neighbor-discovery.md",
+            "references/user-aligned-discovery.md",
+            "references/active-discovery-loop.md",
+            "references/research-impact-and-preference.md",
+            "references/github-hot-similar-discovery.md",
+            "references/source-ecosystems-and-time-windows.md",
             "references/release-requirements.md",
             "references/contract-schema.md",
             "references/portability.md",
@@ -641,7 +698,7 @@ class ResearchContractTests(unittest.TestCase):
         ):
             self.assertTrue((SKILL_ROOT / relative_path).is_file(), relative_path)
         interface = (SKILL_ROOT / "agents" / "openai.yaml").read_text(encoding="utf-8")
-        self.assertIn('display_name: "Research Discovery and Translation Audit"', interface)
+        self.assertIn('display_name: "Research Source Radar"', interface)
         self.assertIn("authoritative metadata", interface)
         short_description = next(
             line.split('"', 2)[1]
@@ -688,9 +745,13 @@ class ResearchContractTests(unittest.TestCase):
         heading_pairs = (
             ("Quick Start", "快速开始"),
             ("Use It For", "适合用它做什么"),
+            ("Relevance-First Retrieval", "先找对，再排序"),
+            ("User-Aligned Discovery", "用户对齐的来源发现"),
+            ("Discovery Core v3 (Experimental)", "Discovery Core v3（实验路线）"),
             ("Inputs and Outputs", "输入与产出"),
             ("Workflow", "工作流程"),
             ("Emerging and Popular Discovery", "新兴与热门内容发现"),
+            ("Source Ecosystems And Time Windows", "来源生态与时间窗口"),
             ("Seed-to-Neighbor Discovery", "线索到邻近项目发现"),
             ("Coverage And Token Efficiency", "覆盖面与 Token 效率"),
             ("Modes", "工作模式"),
@@ -717,17 +778,26 @@ class ResearchContractTests(unittest.TestCase):
             self.assertEqual([pair[1] for pair in heading_pairs], chinese)
 
     def test_neighbor_coverage_probe_and_token_layers_are_documented(self):
-        skill_text = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        skill_text = skill_documentation()
         self.assertIn("### Adaptive Coverage And Token Budget", skill_text)
         self.assertIn("one targeted gap query", skill_text)
         self.assertIn("L0", skill_text)
         self.assertIn("L1", skill_text)
         self.assertIn("L2 only when the user asks", skill_text)
-        self.assertIn("four completed web-search calls", skill_text)
+        self.assertIn("three batched web-search calls", skill_text)
         self.assertIn("eight query strings", skill_text)
 
+    def test_long_tail_neighbor_discovery_is_explicitly_linked(self):
+        skill_text = skill_documentation()
+        reference = (SKILL_ROOT / "references" / "long-tail-neighbor-discovery.md").read_text(encoding="utf-8")
+        self.assertIn("long-tail-neighbor-discovery.md", skill_text)
+        self.assertIn("Family-Diverse Selection", reference)
+        self.assertIn("Cross-Disciplinary Safeguard", reference)
+        self.assertIn("user-approved novel", reference)
+        self.assertIn("hidden gold list", reference)
+
     def test_neighbor_mult_path_fusion_and_two_stage_reranking_are_documented(self):
-        skill_text = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        skill_text = skill_documentation()
         self.assertIn("### Multi-Path Fusion And Two-Stage Reranking", skill_text)
         self.assertIn("canonical identity", skill_text)
         self.assertIn("discovery_paths", skill_text)
@@ -737,15 +807,102 @@ class ResearchContractTests(unittest.TestCase):
         self.assertIn("path diversity only as a tie-breaker", skill_text)
         self.assertIn("do not return raw search pages", skill_text)
 
+    def test_active_discovery_loop_is_documented_and_bounded(self):
+        skill_text = skill_documentation()
+        reference = (SKILL_ROOT / "references" / "active-discovery-loop.md").read_text(encoding="utf-8")
+        self.assertIn("### Active Discovery Loop And Contribution Gap Matrix", skill_text)
+        for marker in (
+            "contribution_map",
+            "gap_matrix",
+            "next_query_reason",
+            "bridge_paths",
+            "self_refutation",
+            "stop_evidence",
+        ):
+            self.assertIn(marker, skill_text)
+            self.assertIn(marker, reference)
+        self.assertIn("two batched searches", reference)
+        self.assertIn("reserve at least 60 seconds", reference)
+        self.assertIn("one coverage probe", reference)
+        self.assertIn("Do not infer a private preference profile", reference)
+        self.assertIn("user_approved_novel@k", reference)
+
+    def test_research_impact_preference_and_hotness_protocol_is_documented(self):
+        skill_text = skill_documentation()
+        reference = (SKILL_ROOT / "references" / "research-impact-and-preference.md").read_text(encoding="utf-8")
+        self.assertIn("Research-impact ranking", reference)
+        self.assertIn("Deployment-fit ranking", reference)
+        self.assertIn("at least two independent source groups", reference)
+        self.assertIn("opt-in and auditable", reference.lower())
+        for marker in (
+            "research_impact",
+            "project_shift",
+            "mechanism_transfer",
+            "deployment_fit",
+            "next_experiment",
+            "popularity_signal",
+        ):
+            self.assertIn(marker, reference)
+        self.assertIn("research-impact-and-preference.md", skill_text)
+
+    def test_github_hot_similar_discovery_is_explicit_and_bounded(self):
+        skill_text = skill_documentation()
+        protocol = (SKILL_ROOT / "references" / "github-hot-similar-discovery.md").read_text(encoding="utf-8")
+        self.assertIn("github-hot-similar-discovery.md", skill_text)
+        for marker in (
+            "Global trend lane",
+            "Topic and mechanism lane",
+            "High-star and velocity lane",
+            "Independent attention lane",
+            "Similarity Gate",
+            "at least two",
+            "evidence_policy: discovery_only",
+            "popularity_only_or_excluded",
+            "Do not claim that the current GitHub top list is a",
+        ):
+            self.assertIn(marker, protocol)
+
+    def test_source_ecosystems_and_time_windows_are_explicit_and_bounded(self):
+        skill_text = skill_documentation()
+        reference = (SKILL_ROOT / "references/source-ecosystems-and-time-windows.md").read_text(encoding="utf-8")
+        self.assertIn("source-ecosystems-and-time-windows.md", skill_text)
+        for marker in (
+            "Humanities and digital humanities",
+            "Economics and social science",
+            "recent_6m",
+            "foundational",
+            "Recall protection rule",
+            "relevant_but_not_hot",
+            "Trend signals may",
+            "evidence_policy: discovery_only",
+            "Do not search every platform by default",
+            "hot_but_transfer_only",
+            "unavailable or inaccessible",
+        ):
+            self.assertIn(marker, reference)
+
+    def test_trend_route_is_documented_as_a_sidecar_not_a_recall_replacement(self):
+        skill_text = skill_documentation()
+        protocol = (SKILL_ROOT / "references/discovery-protocol.md").read_text(encoding="utf-8")
+        documents = [skill_text, protocol]
+        readme_path = SKILL_ROOT / "README.md"
+        if readme_path.exists():
+            documents.append(readme_path.read_text(encoding="utf-8"))
+        for text in documents:
+            self.assertIn("sidecar", text)
+            self.assertIn("relevant_but_not_hot", text)
+        self.assertIn("core relevance routes", skill_text)
+        self.assertIn("quiet source", protocol)
+
     def test_neighbor_fusion_separates_provenance_from_relevance_and_opaque_scores(self):
-        skill_text = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        skill_text = skill_documentation()
         self.assertIn("not relevance evidence", skill_text)
         self.assertIn("cannot override an identity mismatch", skill_text)
         self.assertIn("structured lexicographic order rather than a single opaque aggregate score", skill_text)
         self.assertIn("L2 reading remains limited", skill_text)
 
     def test_user_seed_recovery_and_hard_negative_gate_are_documented(self):
-        skill_text = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        skill_text = skill_documentation()
         reference_text = (SKILL_ROOT / "references/seed-to-neighbor-discovery.md").read_text(encoding="utf-8")
         self.assertIn("### User-Seed Recovery And Hard-Negative Gate", skill_text)
         self.assertIn("anchor_seed", skill_text)
@@ -756,14 +913,55 @@ class ResearchContractTests(unittest.TestCase):
         self.assertIn("### 4A. User-seed recovery and hard negatives", reference_text)
 
     def test_user_seed_recovery_does_not_claim_social_graph_or_exhaustive_precision(self):
-        skill_text = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        skill_text = skill_documentation()
         reference_text = (SKILL_ROOT / "references/seed-to-neighbor-discovery.md").read_text(encoding="utf-8")
         self.assertIn("do not silently add remembered or private social-feed items", skill_text)
         self.assertIn("Do not infer them from private social-platform history", reference_text)
         self.assertIn("do not prove exhaustive", reference_text)
 
+    def test_user_aligned_discovery_recovery_protocol_is_documented(self):
+        skill_text = skill_documentation()
+        reference_text = (SKILL_ROOT / "references/user-aligned-discovery.md").read_text(encoding="utf-8")
+        self.assertIn("### User-Aligned Discovery And Missed-Source Recovery", skill_text)
+        self.assertIn("discovery-recall", skill_text)
+        for marker in (
+            "recovered_known_lead",
+            "new_neighbor",
+            "uncovered_known_lead",
+            "bridge_to_anchor",
+            "known_lead_recovery@k",
+            "baseline_missed_recovery@k",
+            "user_approved_novel@k",
+        ):
+            self.assertIn(marker, reference_text)
+        self.assertIn("does not create a hidden preference profile", reference_text)
+        self.assertIn("A recovered known lead is not independent discovery", reference_text)
+
+    def test_discovery_recall_v2_separates_pool_from_unified_selection(self):
+        skill_text = skill_documentation()
+        reference_text = (SKILL_ROOT / "references/discovery-recall-v2.md").read_text(encoding="utf-8")
+        self.assertIn("discovery-recall-v2.md", skill_text)
+        for marker in (
+            "candidate pool",
+            "final ranked list",
+            "runtime-contract-v1.json",
+            "Delayed Commitment",
+            "Unified Selection",
+            "one role",
+            "wrong title",
+            "user_approved_novel@k",
+            "known-lead recovery",
+        ):
+            self.assertIn(marker, reference_text)
+        self.assertIn("candidate_pool_size", skill_text)
+        self.assertIn("Do not let early lexical matches fill the shortlist", skill_text)
+        self.assertIn("quality floor inside the unified list", skill_text)
+        self.assertIn("exact identity check", skill_text)
+        self.assertIn("Treat this as a final gate", skill_text)
+        self.assertIn("response_identity_gate.py", skill_text)
+
     def test_neighbor_stop_rule_has_no_legacy_conflicting_sentence(self):
-        skill_text = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        skill_text = skill_documentation()
         self.assertIn("The global neighbor stop rule below remains authoritative", skill_text)
         self.assertNotIn("stop after the seed plus 3–5 distinct candidate families", skill_text)
 
@@ -781,8 +979,27 @@ class ResearchContractTests(unittest.TestCase):
             self.assertTrue((destination / "SKILL.md").is_file())
             self.assertTrue((destination / "RELEASE_COMPLETENESS.json").is_file())
             self.assertTrue((destination / "references" / "portability.md").is_file())
+            self.assertTrue((destination / "references" / "user-aligned-recovery-gold-v1.json").is_file())
+            self.assertTrue((destination / "scripts" / "test_research_contract.py").is_file())
             with self.assertRaises(FileExistsError):
                 installer.install("agents-project", project=project, force=False, source=SKILL_ROOT)
+
+    def test_benchmark_treatment_stage_excludes_holdout_fixtures_but_keeps_tests(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            destination = root / "treatment"
+            staged = installer.stage_package(
+                SKILL_ROOT,
+                destination,
+                force=False,
+                benchmark_treatment=True,
+            )
+            self.assertIsNotNone(staged)
+            assert staged is not None
+            self.assertFalse((staged / "references" / "user-aligned-recovery-gold-v1.json").exists())
+            self.assertFalse((staged / "references" / "supervision-retrieval-ab-tasks.json").exists())
+            self.assertTrue((staged / "scripts" / "test_research_contract.py").is_file())
+            shutil.rmtree(staged)
 
     def test_installer_rejects_wrong_required_entry_types(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -2744,6 +2961,22 @@ class ResearchContractTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "identifier mismatch"):
             rc.verify_arxiv("1706.03762v1", 1.0)
+
+    def test_page_metadata_parser_prefers_structured_citation_title(self):
+        parser = rc.PageMetadataParser()
+        parser.feed(
+            '<html><head><title>Publisher shell</title>'
+            '<meta content="A &amp; B: Study Results" name="citation_title">'
+            '</head></html>'
+        )
+        parser.close()
+        self.assertEqual("A & B: Study Results", parser.best_title())
+
+    def test_page_metadata_parser_falls_back_to_html_title(self):
+        parser = rc.PageMetadataParser()
+        parser.feed("<html><head><title>  Useful   page title </title></head></html>")
+        parser.close()
+        self.assertEqual("Useful page title", parser.best_title())
 
     def test_strict_json_and_atom_parsers_survive_seeded_random_bytes(self):
         rng = random.Random(2026071604)  # nosec B311

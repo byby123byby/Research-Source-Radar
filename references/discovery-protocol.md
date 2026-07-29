@@ -78,7 +78,7 @@ Record which chaining paths were available and completed, plus evidence of the r
 
 ## Freshness
 
-Use a dated cutoff. Search publication year, release date, repository update, and latest stable version separately. A new commit is not necessarily a new method; an older foundational source may remain highly relevant.
+Use a dated cutoff. Search publication year, release date, repository update, and latest stable version separately. A new commit is not necessarily a new method; an older foundational source may remain highly relevant. Read [source-ecosystems-and-time-windows.md](source-ecosystems-and-time-windows.md) when the request crosses disciplines or asks for recent/last-six-month work.
 
 Run a refresh when:
 
@@ -107,14 +107,24 @@ Deduplicate mirrors and low-effort forks. Pin a commit/release and record the ac
 
 Run this additional route when the question asks what is new, emerging, popular, fast-growing, or receiving unusual attention. It broadens discovery beyond bibliographic databases without turning attention into evidence.
 
+This route is a sidecar, not a replacement for core retrieval. Problem,
+mechanism, citation, alternative, failure, and foundational lanes must be
+completed independently. A trend-only result cannot satisfy the core coverage
+requirement, and a quiet source that passes the relevance gate must remain
+visible as `relevant_but_not_hot`.
+
 Define before searching:
 
-- observation window, such as 7, 30, or 90 days;
+- observation window, such as 7, 30, 180 days, or a separate foundational lane;
+- the time bucket label (`rapid_attention`, `recent_activity`, `recent_6m`, or `foundational`);
+- the discipline-specific source ecosystem and native attention signal;
 - what “popular” means for this question;
 - at least two independent signal sources;
 - a triangulation rule and a refresh date.
 
 Possible signals include repository star or contributor velocity, recent substantive releases, package/model adoption, benchmark visibility, repeated technical-blog coverage, newsletters or curated lists, conference demos, and community discussion. Prefer rate or time-bounded change over cumulative totals. Search technical blogs from maintainers and independent practitioners, but label first-party launch material, sponsored content, reposts, and unverifiable performance claims.
+
+For GitHub-specific requests, use [github-hot-similar-discovery.md](github-hot-similar-discovery.md) as the operational subprotocol. It requires separate global daily/weekly trending, topic/mechanism, high-star or activity, and independent-coverage lanes. A global trending page is only one attention source and may be dominated by unrelated infrastructure; the topic and mechanism lanes must still run. A high cumulative star count is not a star-velocity observation, and GitHub trending plus GitHub metadata belong to the same platform independence group.
 
 For every source, record an `independence_group`; correlated reposts, feeds derived from the same ranking, and multiple names for the same platform belong to one group. For every signal, record its source, exact query/feed, observation time, value, evidence, and linked candidate ID. A candidate found through a signal uses `trend:<signal-id>` in `discovered_via`. Create a `popular`, `emerging`, `fast_growing`, or `widely_discussed` claim only when at least two signals for that candidate come from different independence groups. Always set `evidence_policy` to `discovery_only`.
 

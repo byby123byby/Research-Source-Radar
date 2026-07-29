@@ -156,8 +156,8 @@ class AuditReleaseTests(unittest.TestCase):
     def test_current_release_completeness_matrix_passes(self):
         result = audit.validate_release_completeness(SKILL_ROOT)
         self.assertEqual("passed", result["status"], result["errors"])
-        self.assertEqual(9, result["requirements"])
-        self.assertEqual(9, result["capabilities"])
+        self.assertEqual(10, result["requirements"])
+        self.assertEqual(12, result["capabilities"])
 
     def test_completeness_matrix_rejects_missing_field_and_marker(self):
         with tempfile.TemporaryDirectory() as directory:

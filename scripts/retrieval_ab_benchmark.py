@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 import math
@@ -13,6 +14,7 @@ import re
 import shutil
 import signal
 import subprocess  # nosec B404
+import sys
 import tempfile
 import time
 import urllib.parse
@@ -21,10 +23,53 @@ from pathlib import Path
 from typing import Any, cast
 
 import research_contract as contract
+import install_skill as installer
+from runtime_contract import DEFAULT_MAX_SOURCES, PROFILE_CONTRACTS, SOURCE_ROLES
 
 
 SCHEMA_VERSION = 1
 BENCHMARK_ID = "supervision-retrieval-ab-v1"
+SUPPORTED_BENCHMARK_IDS = {
+    BENCHMARK_ID,
+    "research-source-radar-user-aligned-v1",
+    "research-source-radar-cross-domain-v3-v1",
+}
+RECOVERY_BENCHMARK_IDS = {
+    "research-source-radar-user-aligned-v1",
+    "research-source-radar-cross-domain-v3-v1",
+}
+HOLDOUT_BENCHMARK_IDS = {"research-source-radar-user-aligned-v1"}
+
+
+def find_holdout_leaks(skill_root: Path, gold_path: Path) -> list[str]:
+    """Find canonical hidden-lead identifiers exposed to the treatment package."""
+
+    gold = contract.load_json(gold_path)
+    lead_sets = gold.get("lead_sets")
+    if not isinstance(lead_sets, dict):
+        raise ValueError("holdout gold must contain lead_sets")
+    identifiers = sorted(
+        {
+            str(lead.get("id") or "").casefold()
+            for leads in lead_sets.values()
+            if isinstance(leads, list)
+            for lead in leads
+            if isinstance(lead, dict) and len(str(lead.get("id") or "")) >= 4
+        }
+    )
+    leaks: list[str] = []
+    for path in sorted(skill_root.rglob("*")):
+        if not path.is_file() or path.is_symlink() or path.stat().st_size > 5_000_000:
+            continue
+        try:
+            text_value = path.read_text(encoding="utf-8").casefold()
+        except UnicodeDecodeError:
+            continue
+        for identifier in identifiers:
+            pattern = rf"(?<![a-z0-9]){re.escape(identifier)}(?![a-z0-9])"
+            if re.search(pattern, text_value):
+                leaks.append(f"{path.relative_to(skill_root).as_posix()}: {identifier}")
+    return leaks
 TASK_ID_PATTERN = re.compile(r"TASK-[0-9]{3}")
 TRIAL_ID_PATTERN = re.compile(r"TRIAL-[0-9A-F]{16}")
 SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
@@ -52,6 +97,8 @@ PRIMARY_METRICS = ("ndcg_at_10", "valid_high_relevance_sources")
 MAX_TASKS = 200
 MAX_SOURCES = 20
 MAX_QUERIES = 50
+ACTIVE_LOOP_MAX_QUERIES = 8
+RECOVERY_BUDGET = cast(dict[str, int], PROFILE_CONTRACTS["recovery"]["budget"])
 MAX_TEXT = 8_000
 MAX_ERROR_TAIL = 4_000
 
@@ -130,8 +177,8 @@ def validate_tasks(data: dict[str, Any]) -> list[str]:
     )
     if data.get("schema_version") != SCHEMA_VERSION:
         errors.append(f"schema_version must be {SCHEMA_VERSION}")
-    if data.get("benchmark_id") != BENCHMARK_ID:
-        errors.append(f"benchmark_id must be {BENCHMARK_ID}")
+    if data.get("benchmark_id") not in SUPPORTED_BENCHMARK_IDS:
+        errors.append(f"benchmark_id must be one of {sorted(SUPPORTED_BENCHMARK_IDS)}")
     if not valid_cutoff(data.get("cutoff_date")):
         errors.append("cutoff_date must be a non-future ISO date")
     if not nonempty_string(data.get("research_question"), limit=2_000):
@@ -225,7 +272,7 @@ def response_schema() -> dict[str, Any]:
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
         "additionalProperties": False,
-        "required": ["summary", "sources", "queries", "gaps", "constraint_notes"],
+        "required": ["summary", "sources", "queries", "gaps", "constraint_notes", "discovery_trace"],
         "properties": {
             "summary": {"type": "string", "minLength": 1, "maxLength": MAX_TEXT},
             "sources": {
@@ -239,18 +286,48 @@ def response_schema() -> dict[str, Any]:
                         "title",
                         "url",
                         "source_type",
+                        "role",
                         "relevance_rationale",
                         "mechanism",
                         "limitations",
+                        "research_impact",
+                        "project_shift",
+                        "mechanism_transfer",
+                        "deployment_fit",
+                        "next_experiment",
+                        "popularity_signal",
+                        "popularity_evidence",
                     ],
                     "properties": {
                         "rank": {"type": "integer", "minimum": 1, "maximum": MAX_SOURCES},
                         "title": {"type": "string", "minLength": 1, "maxLength": 1_000},
                         "url": {"type": "string", "minLength": 1, "maxLength": 2_000},
                         "source_type": {"enum": sorted(SOURCE_TYPES)},
+                        "role": {"enum": list(SOURCE_ROLES)},
                         "relevance_rationale": {"type": "string", "minLength": 1, "maxLength": 2_000},
                         "mechanism": {"type": "string", "maxLength": 2_000},
                         "limitations": {"type": "string", "maxLength": 2_000},
+                        "research_impact": {"enum": ["high", "medium", "low", "exploratory"]},
+                        "project_shift": {"type": "string", "maxLength": 2_000},
+                        "mechanism_transfer": {"enum": ["direct", "adapt", "represented", "exploratory"]},
+                        "deployment_fit": {"enum": ["direct", "partial", "incompatible", "unknown"]},
+                        "next_experiment": {"type": "string", "maxLength": 2_000},
+                        "popularity_signal": {"enum": ["none", "observed", "triangulated"]},
+                        "popularity_evidence": {
+                            "type": "array",
+                            "maxItems": 6,
+                            "items": {
+                                "type": "object",
+                                "additionalProperties": False,
+                                "required": ["kind", "url", "claim", "independence_group"],
+                                "properties": {
+                                    "kind": {"type": "string", "minLength": 1, "maxLength": 100},
+                                    "url": {"type": "string", "minLength": 1, "maxLength": 2_000},
+                                    "claim": {"type": "string", "minLength": 1, "maxLength": 1_000},
+                                    "independence_group": {"type": "string", "minLength": 1, "maxLength": 200},
+                                },
+                            },
+                        },
                     },
                 },
             },
@@ -277,14 +354,132 @@ def response_schema() -> dict[str, Any]:
                 "items": {"type": "string", "minLength": 1, "maxLength": 2_000},
                 "maxItems": 30,
             },
+            "discovery_trace": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": [
+                    "mode",
+                    "route",
+                    "attempted_families",
+                    "covered_families",
+                    "uncovered_families",
+                    "budget_used",
+                    "budget_remaining",
+                    "contribution_map",
+                    "gap_matrix",
+                    "next_query_reason",
+                    "bridge_paths",
+                    "self_refutation",
+                    "stop_evidence",
+                ],
+                "properties": {
+                    "mode": {"enum": ["used", "not_used", "blocked"]},
+                    "route": {"enum": ["fast", "recovery", "standard"]},
+                    "attempted_families": {"type": "array", "maxItems": 12, "items": {"type": "string", "maxLength": 200}},
+                    "covered_families": {"type": "array", "maxItems": 12, "items": {"type": "string", "maxLength": 200}},
+                    "uncovered_families": {"type": "array", "maxItems": 12, "items": {"type": "string", "maxLength": 200}},
+                    "budget_used": {"type": "object", "additionalProperties": False, "required": ["query_records", "targeted_opens", "gap_probes"], "properties": {
+                        "query_records": {"type": "integer", "minimum": 0, "maximum": 8},
+                        "targeted_opens": {"type": "integer", "minimum": 0, "maximum": 2},
+                        "gap_probes": {"type": "integer", "minimum": 0, "maximum": 1},
+                    }},
+                    "budget_remaining": {"type": "object", "additionalProperties": False, "required": ["query_records", "targeted_opens", "gap_probes"], "properties": {
+                        "query_records": {"type": "integer", "minimum": 0, "maximum": 8},
+                        "targeted_opens": {"type": "integer", "minimum": 0, "maximum": 2},
+                        "gap_probes": {"type": "integer", "minimum": 0, "maximum": 1},
+                    }},
+                    "contribution_map": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["problem", "inputs", "mechanism", "outputs", "constraints", "evidence"],
+                        "properties": {
+                            "problem": {"type": "string", "minLength": 1, "maxLength": 2_000},
+                            "inputs": {"type": "string", "minLength": 1, "maxLength": 2_000},
+                            "mechanism": {"type": "string", "minLength": 1, "maxLength": 2_000},
+                            "outputs": {"type": "string", "minLength": 1, "maxLength": 2_000},
+                            "constraints": {"type": "string", "minLength": 1, "maxLength": 2_000},
+                            "evidence": {"type": "string", "minLength": 1, "maxLength": 2_000},
+                        },
+                    },
+                    "gap_matrix": {
+                        "type": "array",
+                        "maxItems": 30,
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": False,
+                            "required": ["family", "status", "missing_atoms", "supporting_sources"],
+                            "properties": {
+                                "family": {"type": "string", "minLength": 1, "maxLength": 200},
+                                "status": {"enum": ["covered", "uncertain", "empty", "not_applicable"]},
+                                "missing_atoms": {"type": "array", "maxItems": 12, "items": {"type": "string", "maxLength": 200}},
+                                "supporting_sources": {"type": "array", "maxItems": 12, "items": {"type": "string", "maxLength": 1_000}},
+                            },
+                        },
+                    },
+                    "next_query_reason": {"type": "string", "minLength": 1, "maxLength": 2_000},
+                    "bridge_paths": {
+                        "type": "array",
+                        "maxItems": 12,
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": False,
+                            "required": ["bridge_type", "from_id", "to_id", "source_locator", "bridge_strength"],
+                            "properties": {
+                                "bridge_type": {"type": "string", "minLength": 1, "maxLength": 200},
+                                "from_id": {"type": "string", "minLength": 1, "maxLength": 1_000},
+                                "to_id": {"type": "string", "minLength": 1, "maxLength": 1_000},
+                                "source_locator": {"type": "string", "minLength": 1, "maxLength": 2_000},
+                                "bridge_strength": {"enum": ["strong", "moderate", "weak", "unresolved"]},
+                            },
+                        },
+                    },
+                    "self_refutation": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["repeated_families", "empty_cells", "hard_negative", "transfer_risks"],
+                        "properties": {
+                            "repeated_families": {"type": "array", "maxItems": 12, "items": {"type": "string", "maxLength": 500}},
+                            "empty_cells": {"type": "array", "maxItems": 12, "items": {"type": "string", "maxLength": 500}},
+                            "hard_negative": {"type": "string", "minLength": 1, "maxLength": 2_000},
+                            "transfer_risks": {"type": "array", "maxItems": 12, "items": {"type": "string", "maxLength": 500}},
+                        },
+                    },
+                    "stop_evidence": {"type": "string", "minLength": 1, "maxLength": 2_000},
+                },
+            },
         },
     }
 
 
-def build_prompt(task: dict[str, Any], cutoff_date: str, max_sources: int) -> str:
+def trial_response_schema(condition: str) -> dict[str, Any]:
+    """Return the same output contract for both experimental conditions."""
+    if condition not in CONDITIONS:
+        raise ValueError(f"unsupported condition: {condition}")
+    return response_schema()
+
+
+def build_prompt(
+    task: dict[str, Any],
+    cutoff_date: str,
+    max_sources: int,
+    *,
+    recovery_route_required: bool = False,
+) -> str:
+    shared_query_cap = int(
+        PROFILE_CONTRACTS["recovery"]["budget"]["query_records"]
+        if recovery_route_required
+        else PROFILE_CONTRACTS["standard"]["budget"]["query_records"]
+    )
     constraints = "\n".join(f"- {item}" for item in cast(list[str], task["constraints"]))
     source_types = ", ".join(cast(list[str], task["source_types"]))
     freshness = "Use sources available by the frozen cutoff date." if task["time_sensitive"] else "Include foundational and current sources where relevant."
+    route_instruction = (
+        "This task evaluates the installed Skill's recovery route. Do not select fast merely because this is a "
+        "benchmark; when the Skill is present, use mode=used and route=recovery. The baseline has no installed Skill "
+        "and must use mode=not_used.\n\n"
+        if recovery_route_required
+        else ""
+    )
     return (
         "You are participating in a controlled research-retrieval benchmark.\n"
         "Use any installed skill that directly applies. Search the internet rather than relying only on memory. "
@@ -293,11 +488,23 @@ def build_prompt(task: dict[str, Any], cutoff_date: str, max_sources: int) -> st
         f"Maximum ranked sources: {max_sources}\n"
         f"Preferred source types: {source_types}\n"
         f"Freshness rule: {freshness}\n\n"
+        f"{route_instruction}"
         f"Task: {task['prompt']}\n\n"
         f"Project constraints:\n{constraints}\n\n"
-        "Rank sources by usefulness to the task. Use canonical paper, repository, model, dataset, or official URLs. "
+        "Rank one unified source list by usefulness to the task. Give every source one role: direct, mechanism, "
+        "validation, current, or adjacent. Use canonical paper, repository, model, dataset, or official URLs. "
         "Record the actual query and source interface used. Separate directly deployable work from mechanisms that can only be adapted. "
-        "Keep unresolved identity or evidence gaps visible."
+        "Keep unresolved identity or evidence gaps visible. Use concise evidence and do not carry raw result pages, full abstracts, "
+        "or README bodies into later calls. Always include discovery_trace in the JSON: use mode=used only when an installed "
+        "research-discovery skill was actually loaded and its active loop was executed; if no such skill was loaded, use "
+        "mode=not_used or blocked. Every source must include the research-impact, transfer, deployment-fit, next-experiment, "
+        "and popularity fields; use popularity_signal=none and an empty popularity_evidence list when no attention signal was verified. "
+        "Use popularity_signal=triangulated only when popularity_evidence contains at least two distinct independence_group values; "
+        "otherwise use observed or none. This benchmark tests research-source discovery across disciplines, but this shared task "
+        "prompt must not prescribe condition-specific search, ranking, or discovery behavior; that behavior must come from the "
+        "installed Skill or from the baseline agent's ordinary research process. The final queries array is a hard shared "
+        f"audit cap: record at most {shared_query_cap} distinct query records. If more search is needed, stop searching, record the missing lane "
+        "or timeout in gaps and stop_evidence, and do not emit an additional query record."
     )
 
 
@@ -334,7 +541,12 @@ def prepare_manifest(
     trials: list[dict[str, Any]] = []
     for task_id in set_ids:
         task = task_lookup[task_id]
-        prompt = build_prompt(task, str(tasks_data["cutoff_date"]), max_sources)
+        prompt = build_prompt(
+            task,
+            str(tasks_data["cutoff_date"]),
+            max_sources,
+            recovery_route_required=tasks_data["benchmark_id"] in RECOVERY_BENCHMARK_IDS,
+        )
         for repetition in range(1, runs + 1):
             for condition in CONDITIONS:
                 trial_id = deterministic_trial_id(seed, task_id, repetition, condition)
@@ -361,7 +573,7 @@ def prepare_manifest(
     schema = response_schema()
     manifest = {
         "schema_version": SCHEMA_VERSION,
-        "benchmark_id": BENCHMARK_ID,
+        "benchmark_id": tasks_data["benchmark_id"],
         "created_at": utc_now(),
         "cutoff_date": tasks_data["cutoff_date"],
         "phase": phase,
@@ -378,6 +590,7 @@ def prepare_manifest(
             "reasoning_effort": reasoning_effort,
             "max_wall_seconds": max_wall_seconds,
             "max_sources": max_sources,
+            "normalization_policy": "canonical_dedupe_then_cap_and_rerank_v1",
             "fresh_context_per_trial": True,
             "internet_required": True,
             "executor": "codex exec --ephemeral --ignore-user-config",
@@ -417,7 +630,7 @@ def validate_manifest(data: dict[str, Any]) -> list[str]:
         "trials",
     }
     exact_keys(data, expected, "manifest", errors)
-    if data.get("schema_version") != SCHEMA_VERSION or data.get("benchmark_id") != BENCHMARK_ID:
+    if data.get("schema_version") != SCHEMA_VERSION or data.get("benchmark_id") not in SUPPORTED_BENCHMARK_IDS:
         errors.append("manifest schema or benchmark ID is unsupported")
     if parse_timestamp(data.get("created_at")) is None:
         errors.append("manifest created_at must be a timezone-aware ISO timestamp")
@@ -453,6 +666,7 @@ def validate_manifest(data: dict[str, Any]) -> list[str]:
                 "reasoning_effort",
                 "max_wall_seconds",
                 "max_sources",
+                "normalization_policy",
                 "fresh_context_per_trial",
                 "internet_required",
                 "executor",
@@ -470,6 +684,8 @@ def validate_manifest(data: dict[str, Any]) -> list[str]:
         source_limit = execution.get("max_sources")
         if not isinstance(source_limit, int) or isinstance(source_limit, bool) or not 1 <= source_limit <= MAX_SOURCES:
             errors.append(f"manifest.execution.max_sources must be between 1 and {MAX_SOURCES}")
+        if execution.get("normalization_policy") != "canonical_dedupe_then_cap_and_rerank_v1":
+            errors.append("manifest.execution.normalization_policy is unsupported")
         if execution.get("fresh_context_per_trial") is not True:
             errors.append("manifest.execution.fresh_context_per_trial must be true")
         if execution.get("internet_required") is not True:
@@ -583,16 +799,124 @@ def validate_manifest(data: dict[str, Any]) -> list[str]:
     return errors
 
 
-def validate_answer(value: Any) -> list[str]:
+def validate_discovery_trace(value: Any) -> list[str]:
     errors: list[str] = []
     if not isinstance(value, dict):
+        return ["answer.discovery_trace must be an object"]
+    expected = {
+        "mode",
+        "route",
+        "attempted_families",
+        "covered_families",
+        "uncovered_families",
+        "budget_used",
+        "budget_remaining",
+        "contribution_map",
+        "gap_matrix",
+        "next_query_reason",
+        "bridge_paths",
+        "self_refutation",
+        "stop_evidence",
+    }
+    exact_keys(value, expected, "answer.discovery_trace", errors)
+    if value.get("mode") not in {"used", "not_used", "blocked"}:
+        errors.append("answer.discovery_trace.mode is invalid")
+    route = value.get("route")
+    if route not in {"fast", "recovery", "standard"}:
+        errors.append("answer.discovery_trace.route is invalid")
+    for key in ("attempted_families", "covered_families", "uncovered_families"):
+        if not string_list(value.get(key), require_items=False):
+            errors.append(f"answer.discovery_trace.{key} must be a bounded string list")
+    for key in ("budget_used", "budget_remaining"):
+        budget = value.get(key)
+        if not isinstance(budget, dict):
+            errors.append(f"answer.discovery_trace.{key} must be an object")
+            continue
+        exact_keys(
+            budget,
+            {"query_records", "targeted_opens", "gap_probes"},
+            f"answer.discovery_trace.{key}",
+            errors,
+        )
+        for field in ("query_records", "targeted_opens", "gap_probes"):
+            number = budget.get(field)
+            if not isinstance(number, int) or isinstance(number, bool) or number < 0:
+                errors.append(f"answer.discovery_trace.{key}.{field} must be a non-negative integer")
+    contribution_map = value.get("contribution_map")
+    if not isinstance(contribution_map, dict):
+        errors.append("answer.discovery_trace.contribution_map must be an object")
+    else:
+        exact_keys(
+            contribution_map,
+            {"problem", "inputs", "mechanism", "outputs", "constraints", "evidence"},
+            "answer.discovery_trace.contribution_map",
+            errors,
+        )
+        for key in ("problem", "inputs", "mechanism", "outputs", "constraints", "evidence"):
+            if not nonempty_string(contribution_map.get(key), limit=2_000):
+                errors.append(f"answer.discovery_trace.contribution_map.{key} must be non-empty")
+    gap_matrix = value.get("gap_matrix")
+    if not isinstance(gap_matrix, list) or len(gap_matrix) > 30:
+        errors.append("answer.discovery_trace.gap_matrix must contain at most 30 items")
+        gap_matrix = []
+    for index, item in enumerate(gap_matrix):
+        path = f"answer.discovery_trace.gap_matrix[{index}]"
+        if not isinstance(item, dict):
+            errors.append(f"{path} must be an object")
+            continue
+        exact_keys(item, {"family", "status", "missing_atoms", "supporting_sources"}, path, errors)
+        if not nonempty_string(item.get("family"), limit=200):
+            errors.append(f"{path}.family must be non-empty")
+        if item.get("status") not in {"covered", "uncertain", "empty", "not_applicable"}:
+            errors.append(f"{path}.status is invalid")
+        for key in ("missing_atoms", "supporting_sources"):
+            if not string_list(item.get(key), require_items=False):
+                errors.append(f"{path}.{key} must be a bounded string list")
+    if not nonempty_string(value.get("next_query_reason"), limit=2_000):
+        errors.append("answer.discovery_trace.next_query_reason must be non-empty")
+    bridge_paths = value.get("bridge_paths")
+    if not isinstance(bridge_paths, list) or len(bridge_paths) > 12:
+        errors.append("answer.discovery_trace.bridge_paths must contain at most 12 items")
+        bridge_paths = []
+    for index, item in enumerate(bridge_paths):
+        path = f"answer.discovery_trace.bridge_paths[{index}]"
+        if not isinstance(item, dict):
+            errors.append(f"{path} must be an object")
+            continue
+        exact_keys(item, {"bridge_type", "from_id", "to_id", "source_locator", "bridge_strength"}, path, errors)
+        for key in ("bridge_type", "from_id", "to_id", "source_locator"):
+            if not nonempty_string(item.get(key), limit=2_000):
+                errors.append(f"{path}.{key} must be non-empty")
+        if item.get("bridge_strength") not in {"strong", "moderate", "weak", "unresolved"}:
+            errors.append(f"{path}.bridge_strength is invalid")
+    self_refutation = value.get("self_refutation")
+    if not isinstance(self_refutation, dict):
+        errors.append("answer.discovery_trace.self_refutation must be an object")
+    else:
+        exact_keys(self_refutation, {"repeated_families", "empty_cells", "hard_negative", "transfer_risks"}, "answer.discovery_trace.self_refutation", errors)
+        for key in ("repeated_families", "empty_cells", "transfer_risks"):
+            if not string_list(self_refutation.get(key), require_items=False):
+                errors.append(f"answer.discovery_trace.self_refutation.{key} must be a bounded string list")
+        if not nonempty_string(self_refutation.get("hard_negative"), limit=2_000):
+            errors.append("answer.discovery_trace.self_refutation.hard_negative must be non-empty")
+    if not nonempty_string(value.get("stop_evidence"), limit=2_000):
+        errors.append("answer.discovery_trace.stop_evidence must be non-empty")
+    return errors
+
+
+def validate_answer(value: Any, *, max_sources: int = MAX_SOURCES) -> list[str]:
+    errors: list[str] = []
+    if not isinstance(max_sources, int) or isinstance(max_sources, bool) or not 1 <= max_sources <= MAX_SOURCES:
+        return [f"max_sources must be between 1 and {MAX_SOURCES}"]
+    if not isinstance(value, dict):
         return ["answer must be an object"]
-    exact_keys(value, {"summary", "sources", "queries", "gaps", "constraint_notes"}, "answer", errors)
+    allowed_keys = {"summary", "sources", "queries", "gaps", "constraint_notes", "discovery_trace"}
+    exact_keys(value, allowed_keys, "answer", errors)
     if not nonempty_string(value.get("summary")):
         errors.append("answer.summary must be a non-empty bounded string")
     sources = value.get("sources")
-    if not isinstance(sources, list) or len(sources) > MAX_SOURCES:
-        errors.append(f"answer.sources must be a list of at most {MAX_SOURCES}")
+    if not isinstance(sources, list) or len(sources) > max_sources:
+        errors.append(f"answer.sources must be a list of at most {max_sources}")
         sources = []
     seen_ranks: set[int] = set()
     for index, source in enumerate(sources):
@@ -600,12 +924,17 @@ def validate_answer(value: Any) -> list[str]:
         if not isinstance(source, dict):
             errors.append(f"{path} must be an object")
             continue
-        exact_keys(
-            source,
-            {"rank", "title", "url", "source_type", "relevance_rationale", "mechanism", "limitations"},
-            path,
-            errors,
-        )
+        required_source_keys = {
+            "rank", "title", "url", "source_type", "role", "relevance_rationale", "mechanism", "limitations",
+            "research_impact", "project_shift", "mechanism_transfer", "deployment_fit",
+            "next_experiment", "popularity_signal", "popularity_evidence",
+        }
+        unexpected_source_keys = set(source) - required_source_keys
+        if unexpected_source_keys:
+            errors.append(f"{path} has unexpected fields: {sorted(unexpected_source_keys)}")
+        missing_source_keys = required_source_keys - set(source)
+        if missing_source_keys:
+            errors.append(f"{path} is missing required fields: {sorted(missing_source_keys)}")
         rank = source.get("rank")
         if not isinstance(rank, int) or isinstance(rank, bool) or not 1 <= rank <= MAX_SOURCES:
             errors.append(f"{path}.rank is invalid")
@@ -621,6 +950,41 @@ def validate_answer(value: Any) -> list[str]:
                 errors.append(f"{path}.{key} must be a bounded string")
         if source.get("source_type") not in SOURCE_TYPES:
             errors.append(f"{path}.source_type is unsupported")
+        if source.get("role") not in SOURCE_ROLES:
+            errors.append(f"{path}.role is unsupported")
+        for key, allowed in (
+            ("research_impact", {"high", "medium", "low", "exploratory"}),
+            ("mechanism_transfer", {"direct", "adapt", "represented", "exploratory"}),
+            ("deployment_fit", {"direct", "partial", "incompatible", "unknown"}),
+            ("popularity_signal", {"none", "observed", "triangulated"}),
+        ):
+            if key in source and source.get(key) not in allowed:
+                errors.append(f"{path}.{key} is invalid")
+        for key in ("project_shift", "next_experiment"):
+            if key in source and (not isinstance(source.get(key), str) or len(cast(str, source.get(key))) > 2_000):
+                errors.append(f"{path}.{key} must be a bounded string")
+        popularity_evidence = source.get("popularity_evidence")
+        if "popularity_evidence" in source:
+            if not isinstance(popularity_evidence, list) or len(popularity_evidence) > 6:
+                errors.append(f"{path}.popularity_evidence must contain at most 6 items")
+                popularity_evidence = []
+            groups: set[str] = set()
+            for evidence_index, item in enumerate(popularity_evidence):
+                evidence_path = f"{path}.popularity_evidence[{evidence_index}]"
+                if not isinstance(item, dict):
+                    errors.append(f"{evidence_path} must be an object")
+                    continue
+                exact_keys(item, {"kind", "url", "claim", "independence_group"}, evidence_path, errors)
+                for field in ("kind", "url", "claim", "independence_group"):
+                    if not nonempty_string(item.get(field), limit=2_000):
+                        errors.append(f"{evidence_path}.{field} must be non-empty")
+                if isinstance(item.get("independence_group"), str):
+                    groups.add(item["independence_group"])
+            signal = source.get("popularity_signal")
+            if signal == "observed" and len(popularity_evidence) < 1:
+                errors.append(f"{path}.popularity_signal=observed needs one popularity_evidence item")
+            if signal == "triangulated" and len(groups) < 2:
+                errors.append(f"{path}.popularity_signal=triangulated needs two independent evidence groups")
     expected_ranks = list(range(1, len(sources) + 1))
     if sorted(seen_ranks) != expected_ranks:
         errors.append("answer source ranks must be contiguous from 1")
@@ -638,7 +1002,68 @@ def validate_answer(value: Any) -> list[str]:
     for key in ("gaps", "constraint_notes"):
         if not string_list(value.get(key), require_items=False):
             errors.append(f"answer.{key} must be a bounded string list")
+    errors.extend(validate_discovery_trace(value.get("discovery_trace")))
+    trace = value.get("discovery_trace")
+    if (
+        isinstance(trace, dict)
+        and trace.get("mode") == "used"
+        and trace.get("route") == "recovery"
+        and isinstance(queries, list)
+    ):
+        used = trace.get("budget_used")
+        remaining = trace.get("budget_remaining")
+        if isinstance(used, dict) and isinstance(remaining, dict):
+            used_queries = used.get("query_records")
+            if isinstance(used_queries, int) and not isinstance(used_queries, bool):
+                if len(queries) != used_queries:
+                    errors.append(
+                        "answer.queries count must equal recovery budget_used.query_records"
+                    )
+                if used_queries > RECOVERY_BUDGET["query_records"]:
+                    errors.append(
+                        "answer recovery query budget exceeds the runtime contract"
+                    )
+            for field in ("query_records", "targeted_opens", "gap_probes"):
+                used_value = used.get(field)
+                remaining_value = remaining.get(field)
+                if (
+                    isinstance(used_value, int)
+                    and not isinstance(used_value, bool)
+                    and isinstance(remaining_value, int)
+                    and not isinstance(remaining_value, bool)
+                    and used_value + remaining_value > RECOVERY_BUDGET[field]
+                ):
+                    errors.append(
+                        f"answer recovery {field} used-plus-actionable-remaining exceeds the runtime contract"
+                    )
+    if (
+        isinstance(value.get("discovery_trace"), dict)
+        and value["discovery_trace"].get("mode") == "used"
+        and isinstance(queries, list)
+        and len(queries) > ACTIVE_LOOP_MAX_QUERIES
+    ):
+        errors.append(
+            f"answer.queries exceeds the active discovery loop budget of {ACTIVE_LOOP_MAX_QUERIES}"
+        )
     return errors
+
+
+def validate_treatment_trace(
+    answer: Any,
+    *,
+    condition: Any,
+    benchmark_id: Any,
+) -> list[str]:
+    if benchmark_id not in RECOVERY_BENCHMARK_IDS:
+        return []
+    if not isinstance(answer, dict) or not isinstance(answer.get("discovery_trace"), dict):
+        return ["recovery benchmark answer must contain discovery_trace"]
+    trace = cast(dict[str, Any], answer["discovery_trace"])
+    if condition == "skill" and (trace.get("mode"), trace.get("route")) != ("used", "recovery"):
+        return ["Skill condition must execute mode=used and route=recovery for this benchmark"]
+    if condition == "baseline" and trace.get("mode") != "not_used":
+        return ["baseline condition must use discovery_trace.mode=not_used"]
+    return []
 
 
 def validate_response(data: dict[str, Any], manifest: dict[str, Any]) -> list[str]:
@@ -690,12 +1115,34 @@ def validate_response(data: dict[str, Any], manifest: dict[str, Any]) -> list[st
             "error",
         }
         current_execution_keys = execution_keys | {"empty_query_attempts"}
-        if set(execution) != execution_keys and set(execution) != current_execution_keys:
-            exact_keys(execution, current_execution_keys, "response.execution", errors)
+        normalized_execution_keys = current_execution_keys | {"normalization"}
+        if frozenset(execution) not in {frozenset(execution_keys), frozenset(current_execution_keys), frozenset(normalized_execution_keys)}:
+            exact_keys(execution, normalized_execution_keys, "response.execution", errors)
         if "empty_query_attempts" in execution:
             value = execution.get("empty_query_attempts")
             if not isinstance(value, int) or isinstance(value, bool) or value < 0:
                 errors.append("response.execution.empty_query_attempts must be a non-negative integer")
+        if "normalization" in execution:
+            normalization = execution.get("normalization")
+            normalization_fields = {
+                "applied", "raw_source_count", "stored_source_count",
+                "deduplicated_source_count", "capped_source_count", "notes",
+            }
+            if not isinstance(normalization, dict):
+                errors.append("response.execution.normalization must be an object")
+            else:
+                exact_keys(normalization, normalization_fields, "response.execution.normalization", errors)
+                if not isinstance(normalization.get("applied"), bool):
+                    errors.append("response.execution.normalization.applied must be boolean")
+                for key in (
+                    "raw_source_count", "stored_source_count",
+                    "deduplicated_source_count", "capped_source_count",
+                ):
+                    number = normalization.get(key)
+                    if not isinstance(number, int) or isinstance(number, bool) or number < 0:
+                        errors.append(f"response.execution.normalization.{key} must be a non-negative integer")
+                if not string_list(normalization.get("notes"), require_items=False):
+                    errors.append("response.execution.normalization.notes must be a bounded string list")
         if execution.get("status") not in {"completed", "failed"}:
             errors.append("response.execution.status is invalid")
         expected_model = cast(dict[str, Any], manifest.get("execution", {})).get("model")
@@ -721,7 +1168,15 @@ def validate_response(data: dict[str, Any], manifest: dict[str, Any]) -> list[st
         if not isinstance(event_hash, str) or SHA256_PATTERN.fullmatch(event_hash) is None:
             errors.append("response.execution.event_log_sha256 must be a lowercase SHA-256 digest")
         if execution.get("status") == "completed":
-            errors.extend(validate_answer(data.get("answer")))
+            source_limit = cast(dict[str, Any], manifest.get("execution", {})).get("max_sources", MAX_SOURCES)
+            errors.extend(validate_answer(data.get("answer"), max_sources=source_limit))
+            errors.extend(
+                validate_treatment_trace(
+                    data.get("answer"),
+                    condition=data.get("condition"),
+                    benchmark_id=manifest.get("benchmark_id"),
+                )
+            )
             if execution.get("executor_exit_code") != 0:
                 errors.append("completed response must have executor_exit_code 0")
             if execution.get("error") != "":
@@ -764,6 +1219,62 @@ def normalized_source_key(url: str, title: str, source_type: str | None = None) 
     return f"title:{title_key}"
 
 
+def normalize_answer(value: Any, *, max_sources: int) -> tuple[Any, dict[str, Any]]:
+    """Apply the same bounded, auditable source normalization to both conditions."""
+    diagnostics: dict[str, Any] = {
+        "applied": False,
+        "raw_source_count": 0,
+        "stored_source_count": 0,
+        "deduplicated_source_count": 0,
+        "capped_source_count": 0,
+        "notes": [],
+    }
+    if not isinstance(value, dict) or not isinstance(value.get("sources"), list):
+        return value, diagnostics
+    normalized = copy.deepcopy(value)
+    raw_sources = cast(list[Any], normalized["sources"])
+    diagnostics["raw_source_count"] = len(raw_sources)
+    original_ranks = [source.get("rank") if isinstance(source, dict) else None for source in raw_sources]
+    kept: list[Any] = []
+    seen: set[str] = set()
+    duplicate_count = 0
+    for index, source in enumerate(raw_sources):
+        if not isinstance(source, dict):
+            kept.append(source)
+            continue
+        title = source.get("title")
+        url = source.get("url")
+        source_type = source.get("source_type")
+        if isinstance(title, str) and isinstance(url, str):
+            key = normalized_source_key(url, title, source_type if isinstance(source_type, str) else None)
+        else:
+            key = f"invalid:{index}"
+        if key in seen:
+            duplicate_count += 1
+            continue
+        seen.add(key)
+        kept.append(source)
+    capped_count = max(0, len(kept) - max_sources)
+    kept = kept[:max_sources]
+    for rank, source in enumerate(kept, start=1):
+        if isinstance(source, dict):
+            source["rank"] = rank
+    normalized["sources"] = kept
+    diagnostics["stored_source_count"] = len(kept)
+    diagnostics["deduplicated_source_count"] = duplicate_count
+    diagnostics["capped_source_count"] = capped_count
+    notes = cast(list[str], diagnostics["notes"])
+    if duplicate_count:
+        notes.append(f"removed {duplicate_count} duplicate canonical source(s)")
+    if capped_count:
+        notes.append(f"omitted {capped_count} source(s) beyond the shared cap of {max_sources}")
+    rank_changed = original_ranks[:len(kept)] != list(range(1, len(kept) + 1))
+    if rank_changed:
+        notes.append("rewrote source ranks to a contiguous sequence")
+    diagnostics["applied"] = bool(notes)
+    return normalized, diagnostics
+
+
 def load_responses(response_dir: Path, manifest: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
     responses: list[dict[str, Any]] = []
     errors: list[str] = []
@@ -792,6 +1303,14 @@ def load_responses(response_dir: Path, manifest: dict[str, Any]) -> tuple[list[d
     return responses, errors
 
 
+def response_candidates(answer: dict[str, Any]) -> list[tuple[dict[str, Any], str]]:
+    """Return the unified ranked list with each candidate's declared role."""
+    return [
+        (source, str(source.get("role", "direct")))
+        for source in cast(list[dict[str, Any]], answer["sources"])
+    ]
+
+
 def build_blind_pool(
     tasks_data: dict[str, Any], manifest: dict[str, Any], responses: list[dict[str, Any]]
 ) -> dict[str, Any]:
@@ -814,7 +1333,7 @@ def build_blind_pool(
         if cast(dict[str, Any], response["execution"])["status"] != "completed":
             continue
         answer = cast(dict[str, Any], response["answer"])
-        for source in cast(list[dict[str, Any]], answer["sources"]):
+        for source, _role in response_candidates(answer):
             key = normalized_source_key(
                 str(source["url"]), str(source["title"]), str(source["source_type"])
             )
@@ -845,7 +1364,7 @@ def build_blind_pool(
         cast(list[str], item["source_types"]).sort()
     return {
         "schema_version": SCHEMA_VERSION,
-        "benchmark_id": BENCHMARK_ID,
+        "benchmark_id": manifest["benchmark_id"],
         "created_at": utc_now(),
         "manifest_sha256": canonical_hash(manifest),
         "blinding": "condition and repetition removed; judge source relevance and identity independently",
@@ -858,7 +1377,9 @@ def build_blind_pool(
     }
 
 
-def validate_judgments(data: dict[str, Any], expected_manifest_hash: str) -> list[str]:
+def validate_judgments(
+    data: dict[str, Any], expected_manifest_hash: str, expected_benchmark_id: str = BENCHMARK_ID
+) -> list[str]:
     errors: list[str] = []
     exact_keys(
         data,
@@ -866,7 +1387,7 @@ def validate_judgments(data: dict[str, Any], expected_manifest_hash: str) -> lis
         "judgments",
         errors,
     )
-    if data.get("schema_version") != SCHEMA_VERSION or data.get("benchmark_id") != BENCHMARK_ID:
+    if data.get("schema_version") != SCHEMA_VERSION or data.get("benchmark_id") != expected_benchmark_id:
         errors.append("judgment schema or benchmark ID is unsupported")
     if data.get("manifest_sha256") != expected_manifest_hash:
         errors.append("judgments do not belong to this manifest")
@@ -963,20 +1484,33 @@ def trial_metrics(
             "valid_high_relevance_sources": 0.0,
             "invalid_source_rate": 0.0,
             "direct_fit_sources": 0.0,
+            "unified_source_count": 0.0,
+            "primary_source_count": 0.0,
+            "exploration_source_count": 0.0,
+            "exploration_valid_relevant_sources": 0.0,
+            "exploration_valid_high_relevance_sources": 0.0,
+            "discovery_valid_relevant_sources": 0.0,
             "valid_relevant_per_1k_tokens": 0.0,
             "valid_relevant_per_minute": 0.0,
             "wall_seconds": float(execution["wall_seconds"]),
             "total_tokens": float(execution["input_tokens"] + execution["output_tokens"]),
         }
     task_id = str(response["task_id"])
-    sources = sorted(cast(list[dict[str, Any]], cast(dict[str, Any], response["answer"])["sources"]), key=lambda x: int(x["rank"]))
+    answer = cast(dict[str, Any], response["answer"])
+    sources = sorted(cast(list[dict[str, Any]], answer["sources"]), key=lambda x: int(x["rank"]))
     rows: list[dict[str, Any]] = []
+    direct_rows: list[dict[str, Any]] = []
+    exploration_rows: list[dict[str, Any]] = []
     for source in sources:
         key = normalized_source_key(
             str(source["url"]), str(source["title"]), str(source["source_type"])
         )
         judgment = judgments[(task_id, key)]
         rows.append(judgment)
+        if source.get("role") in {"direct", "validation"}:
+            direct_rows.append(judgment)
+        else:
+            exploration_rows.append(judgment)
     relevances = [int(row["relevance"]) for row in rows]
     all_relevant = sum(1 for (judged_task, _), row in judgments.items() if judged_task == task_id and int(row["relevance"]) >= 1)
     retrieved_relevant = sum(1 for row in rows[:20] if int(row["relevance"]) >= 1)
@@ -994,11 +1528,22 @@ def trial_metrics(
     invalid = sum(1 for row in rows if row["identity_valid"] == "invalid")
     direct_fit = sum(
         1
-        for row in rows
+        for row in direct_rows
         if int(row["relevance"]) >= 1
         and row["identity_valid"] == "valid"
         and int(row["constraint_fit"]) == 2
     )
+    exploration_valid_relevant = sum(
+        1
+        for row in exploration_rows
+        if int(row["relevance"]) >= 1 and row["identity_valid"] == "valid"
+    )
+    exploration_high_valid = sum(
+        1
+        for row in exploration_rows
+        if int(row["relevance"]) == 2 and row["identity_valid"] == "valid"
+    )
+    discovery_valid_relevant = valid_relevant
     tokens = int(execution["input_tokens"]) + int(execution["output_tokens"])
     minutes = float(execution["wall_seconds"]) / 60.0
     return {
@@ -1009,6 +1554,12 @@ def trial_metrics(
         "valid_high_relevance_sources": float(high_valid),
         "invalid_source_rate": invalid / len(rows) if rows else 0.0,
         "direct_fit_sources": float(direct_fit),
+        "unified_source_count": float(len(rows)),
+        "primary_source_count": float(len(direct_rows)),
+        "exploration_source_count": float(len(exploration_rows)),
+        "exploration_valid_relevant_sources": float(exploration_valid_relevant),
+        "exploration_valid_high_relevance_sources": float(exploration_high_valid),
+        "discovery_valid_relevant_sources": float(discovery_valid_relevant),
         "valid_relevant_per_1k_tokens": valid_relevant * 1_000.0 / tokens if tokens else 0.0,
         "valid_relevant_per_minute": valid_relevant / minutes if minutes else 0.0,
         "wall_seconds": float(execution["wall_seconds"]),
@@ -1059,7 +1610,7 @@ def score_benchmark(
     if not 1 <= iterations <= 1_000_000:
         raise ValueError("bootstrap iterations must be between 1 and 1000000")
     manifest_hash = canonical_hash(manifest)
-    errors = validate_judgments(judgment_data, manifest_hash)
+    errors = validate_judgments(judgment_data, manifest_hash, str(manifest["benchmark_id"]))
     if errors:
         raise ValueError("invalid judgments: " + "; ".join(errors))
     judgment_lookup = {
@@ -1093,7 +1644,7 @@ def score_benchmark(
         )
         for response in responses
         if cast(dict[str, Any], response["execution"])["status"] == "completed"
-        for source in cast(list[dict[str, Any]], cast(dict[str, Any], response["answer"])["sources"])
+        for source, _role in response_candidates(cast(dict[str, Any], response["answer"]))
     }
     if set(judgment_lookup) != expected_judgments:
         raise ValueError("judgments must match the exact pooled task/source set")
@@ -1129,7 +1680,7 @@ def score_benchmark(
         paired[metric] = bootstrap_task_difference(task_values, iterations=iterations, seed=seed)
     return {
         "schema_version": SCHEMA_VERSION,
-        "benchmark_id": BENCHMARK_ID,
+        "benchmark_id": manifest["benchmark_id"],
         "scored_at": utc_now(),
         "manifest_sha256": manifest_hash,
         "judgments_sha256": canonical_hash(judgment_data),
@@ -1256,8 +1807,39 @@ def count_empty_query_attempts(payload: str) -> int:
 
 
 def safe_error_tail(stdout: str, stderr: str) -> str:
-    combined = (stderr.strip() + "\n" + stdout.strip()).strip()
+    # Keep runner diagnostics ahead of the often much larger JSON event stream.
+    # Otherwise a long successful-looking event log can hide the actual schema
+    # validation error that made the trial unusable.
+    stderr_tail = stderr.strip()[-3_000:]
+    stdout_tail = stdout.strip()[-1_000:]
+    sections = []
+    if stderr_tail:
+        sections.append("stderr:\n" + stderr_tail)
+    if stdout_tail:
+        sections.append("stdout_tail:\n" + stdout_tail)
+    combined = "\n".join(sections).strip()
     return contract.display_safe_text(combined[-MAX_ERROR_TAIL:], preserve_newlines=True)
+
+
+GLOBAL_EXECUTION_BLOCKERS = (
+    "you've hit your usage limit",
+    "you have hit your usage limit",
+    "insufficient_quota",
+    "quota exceeded",
+    "purchase more credits",
+)
+
+
+def global_execution_blocker(response: dict[str, Any]) -> str | None:
+    """Classify failures that invalidate every later trial in the batch."""
+
+    execution = response.get("execution")
+    if not isinstance(execution, dict) or execution.get("status") != "failed":
+        return None
+    error = str(execution.get("error") or "").casefold()
+    if any(marker in error for marker in GLOBAL_EXECUTION_BLOCKERS):
+        return "account_usage_limit"
+    return None
 
 
 def _text_output(value: Any) -> str:
@@ -1303,7 +1885,6 @@ def run_codex_trial(
     if not target_skill.is_dir() or target_skill.is_symlink():
         raise ValueError("target skill must be a real directory")
     prompt_path = run_dir / str(trial["prompt_path"])
-    schema_path = run_dir / "response_schema.json"
     response_path = run_dir / str(trial["response_path"])
     if response_path.exists() or response_path.is_symlink():
         raise FileExistsError(f"response already exists: {response_path}")
@@ -1317,6 +1898,14 @@ def run_codex_trial(
     stderr = ""
     returncode = 1
     answer: dict[str, Any] | None = None
+    normalization: dict[str, Any] = {
+        "applied": False,
+        "raw_source_count": 0,
+        "stored_source_count": 0,
+        "deduplicated_source_count": 0,
+        "capped_source_count": 0,
+        "notes": [],
+    }
     with tempfile.TemporaryDirectory(prefix="retrieval-ab-home-") as home_name, tempfile.TemporaryDirectory(
         prefix="retrieval-ab-work-"
     ) as work_name:
@@ -1326,9 +1915,12 @@ def run_codex_trial(
         (isolated_home / "skills").mkdir(mode=0o700)
         if trial["condition"] == "skill":
             shutil.copytree(target_skill, isolated_home / "skills" / target_skill.name)
+        schema_path = Path(work_name) / "response_schema.json"
+        contract.write_json_atomic(schema_path, response_schema())
         output_file = Path(work_name) / "last-message.json"
         command = [
             str(codex),
+            "--search",
             "exec",
             "--ephemeral",
             "--ignore-user-config",
@@ -1342,8 +1934,6 @@ def run_codex_trial(
             f"model_reasoning_effort={json.dumps(execution['reasoning_effort'])}",
             "-c",
             "suppress_unstable_features_warning=true",
-            "--enable",
-            "standalone_web_search",
             "--output-schema",
             str(schema_path),
             "--output-last-message",
@@ -1353,38 +1943,59 @@ def run_codex_trial(
         ]
         environment = os.environ.copy()
         environment["CODEX_HOME"] = str(isolated_home)
-        process = subprocess.Popen(  # nosec B603
-            command,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            cwd=work_name,
-            env=environment,
-            start_new_session=True,
-        )
+        process: subprocess.Popen[str] | None = None
+        process_terminated = False
         try:
-            process_stdout, process_stderr = process.communicate(
-                input=prompt,
-                timeout=int(execution["max_wall_seconds"]),
+            process = subprocess.Popen(  # nosec B603
+                command,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                cwd=work_name,
+                env=environment,
+                start_new_session=True,
             )
-            stdout = _text_output(process_stdout)
-            stderr = _text_output(process_stderr)
-            returncode = int(process.returncode or 0)
-            if returncode == 0 and output_file.is_file():
-                raw_answer = contract.load_json(output_file)
-                answer_errors = validate_answer(raw_answer)
-                if answer_errors:
-                    stderr = stderr + "\ninvalid final answer: " + "; ".join(answer_errors)
-                else:
-                    answer = raw_answer
-        except subprocess.TimeoutExpired as exc:
-            _terminate_process_group(process)
-            process_stdout, process_stderr = process.communicate()
-            stdout = _text_output(exc.stdout) + _text_output(process_stdout)
-            stderr = _text_output(exc.stderr) + _text_output(process_stderr)
-            stderr = stderr + "\ntrial exceeded hard timeout"
-            returncode = 124
+            try:
+                process_stdout, process_stderr = process.communicate(
+                    input=prompt,
+                    timeout=int(execution["max_wall_seconds"]),
+                )
+                stdout = _text_output(process_stdout)
+                stderr = _text_output(process_stderr)
+                returncode = int(process.returncode or 0)
+                if returncode == 0 and output_file.is_file():
+                    raw_answer = contract.load_json(output_file)
+                    raw_answer, normalization = normalize_answer(
+                        raw_answer,
+                        max_sources=cast(int, execution["max_sources"]),
+                    )
+                    answer_errors = validate_answer(
+                        raw_answer,
+                        max_sources=cast(int, execution["max_sources"]),
+                    )
+                    answer_errors.extend(
+                        validate_treatment_trace(
+                            raw_answer,
+                            condition=trial["condition"],
+                            benchmark_id=manifest["benchmark_id"],
+                        )
+                    )
+                    if answer_errors:
+                        stderr = stderr + "\ninvalid final answer: " + "; ".join(answer_errors)
+                    else:
+                        answer = raw_answer
+            except subprocess.TimeoutExpired as exc:
+                _terminate_process_group(process)
+                process_terminated = True
+                process_stdout, process_stderr = process.communicate()
+                stdout = _text_output(exc.stdout) + _text_output(process_stdout)
+                stderr = _text_output(exc.stderr) + _text_output(process_stderr)
+                stderr = stderr + "\ntrial exceeded hard timeout"
+                returncode = 124
+        finally:
+            if process is not None and not process_terminated and process.poll() is None:
+                _terminate_process_group(process)
     wall_seconds = time.monotonic() - started
     input_tokens, output_tokens = parse_event_usage(stdout)
     empty_query_attempts = count_empty_query_attempts(stdout)
@@ -1405,6 +2016,7 @@ def run_codex_trial(
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
             "empty_query_attempts": empty_query_attempts,
+            "normalization": normalization,
             "executor_exit_code": returncode if returncode >= 0 else 128 + abs(returncode),
             "event_log_sha256": event_hash,
             "error": "" if status == "completed" else safe_error_tail(stdout, stderr),
@@ -1437,6 +2049,32 @@ def command_validate_tasks(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_stage_treatment(args: argparse.Namespace) -> int:
+    source = Path(args.source_skill).expanduser().resolve()
+    output = Path(args.output).expanduser().resolve()
+    gold = Path(args.holdout_gold).expanduser().resolve()
+    staged = installer.stage_package(
+        source,
+        output,
+        force=False,
+        benchmark_treatment=True,
+    )
+    if staged is None:
+        raise ValueError("benchmark treatment output must differ from the source Skill")
+    try:
+        leaks = find_holdout_leaks(staged, gold)
+        if leaks:
+            raise ValueError("sanitized treatment still exposes hidden leads: " + "; ".join(leaks[:20]))
+        os.replace(staged, output)
+        installer.fsync_directory(output.parent)
+    except Exception:
+        if staged.exists():
+            shutil.rmtree(staged)
+        raise
+    print(f"TREATMENT_READY output={output} holdout_leaks=0")
+    return 0
+
+
 def command_prepare(args: argparse.Namespace) -> int:
     tasks_data = contract.load_json(Path(args.tasks).expanduser())
     manifest, prompts = prepare_manifest(
@@ -1455,22 +2093,71 @@ def command_prepare(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_live_preflight(target_skill: Path) -> dict[str, Any]:
+    script = Path(__file__).resolve().with_name("preflight_retrieval_experiment.py")
+    try:
+        completed = subprocess.run(  # nosec B603
+            [sys.executable, str(script), "--skill-root", str(target_skill)],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise ValueError("retrieval preflight timed out; live run blocked") from exc
+    try:
+        payload = contract.strict_json_loads(completed.stdout)
+    except (ValueError, json.JSONDecodeError) as exc:
+        raise ValueError(f"retrieval preflight returned invalid JSON: {exc}") from exc
+    if not isinstance(payload, dict) or completed.returncode != 0 or payload.get("status") != "PASS":
+        detail = payload.get("checks") if isinstance(payload, dict) else completed.stderr
+        raise ValueError(f"retrieval preflight failed; live run blocked: {detail}")
+    return cast(dict[str, Any], payload)
+
+
 def command_run(args: argparse.Namespace) -> int:
     if not args.confirm_live_run:
         raise ValueError("live execution requires --confirm-live-run")
     run_dir = Path(args.run_dir).expanduser().resolve()
     manifest = load_valid_manifest(run_dir / "trial_manifest.json")
+    target_skill = Path(args.target_skill).expanduser().resolve()
+    preflight_result = run_live_preflight(target_skill)
+    holdout_gold = getattr(args, "holdout_gold", None)
+    if manifest["benchmark_id"] in HOLDOUT_BENCHMARK_IDS:
+        if not holdout_gold:
+            raise ValueError("recovery benchmark requires --holdout-gold contamination check")
+        leaks = find_holdout_leaks(target_skill, Path(holdout_gold).expanduser().resolve())
+        if leaks:
+            raise ValueError(
+                "treatment package exposes hidden lead identifiers: " + "; ".join(leaks[:20])
+            )
+    contract.write_json_atomic(run_dir / "preflight_report.json", preflight_result)
+    print(f"PREFLIGHT_PASS checks={len(cast(list[Any], preflight_result['checks']))}")
     response_dir = run_dir / "responses"
     completed = 0
     failed = 0
+    aborted_reason: str | None = None
     trials = cast(list[dict[str, Any]], manifest["trials"])
-    selected = [
-        item
-        for item in trials
-        if (args.condition is None or item["condition"] == args.condition)
-        and (args.task is None or item["task_id"] == args.task)
-        and not (response_dir / f"{item['trial_id']}.json").exists()
-    ]
+    selected = []
+    for item in trials:
+        if args.condition is not None and item["condition"] != args.condition:
+            continue
+        if args.task is not None and item["task_id"] != args.task:
+            continue
+        response_path = response_dir / f"{item['trial_id']}.json"
+        if not response_path.exists():
+            selected.append(item)
+            continue
+        if not args.retry_failed:
+            continue
+        prior = contract.load_json(response_path)
+        if prior.get("execution", {}).get("status") != "failed":
+            continue
+        archive_dir = response_dir / "failed_attempts"
+        archive_dir.mkdir(mode=0o700, exist_ok=True)
+        archive_path = archive_dir / f"{item['trial_id']}-{int(time.time())}.json"
+        response_path.rename(archive_path)
+        selected.append(item)
     if args.limit is not None:
         selected = selected[: args.limit]
     for trial in selected:
@@ -1478,7 +2165,7 @@ def command_run(args: argparse.Namespace) -> int:
         response = run_codex_trial(
             codex=Path(args.codex).expanduser().resolve(),
             source_codex_home=Path(args.source_codex_home).expanduser().resolve(),
-            target_skill=Path(args.target_skill).expanduser().resolve(),
+            target_skill=target_skill,
             run_dir=run_dir,
             manifest=manifest,
             trial=trial,
@@ -1487,7 +2174,19 @@ def command_run(args: argparse.Namespace) -> int:
             completed += 1
         else:
             failed += 1
-    print(f"RUN_COMPLETE attempted={len(selected)} completed={completed} failed={failed}")
+            aborted_reason = global_execution_blocker(response)
+            if aborted_reason is not None:
+                print(
+                    "RUN_ABORTED "
+                    f"reason={aborted_reason} sequence={trial['sequence']} "
+                    "pending_trials_preserved=true"
+                )
+                break
+    attempted = completed + failed
+    print(
+        f"RUN_COMPLETE attempted={attempted} completed={completed} failed={failed} "
+        f"pending={len(selected) - attempted}"
+    )
     return 0 if failed == 0 else 1
 
 
@@ -1540,6 +2239,15 @@ def parser() -> argparse.ArgumentParser:
     validate.add_argument("--tasks", required=True)
     validate.set_defaults(handler=command_validate_tasks)
 
+    treatment = commands.add_parser(
+        "stage-treatment",
+        help="Create a holdout-clean treatment package for a known-lead benchmark",
+    )
+    treatment.add_argument("--source-skill", required=True)
+    treatment.add_argument("--output", required=True)
+    treatment.add_argument("--holdout-gold", required=True)
+    treatment.set_defaults(handler=command_stage_treatment)
+
     prepare = commands.add_parser("prepare", help="Create a randomized paired A/B run")
     prepare.add_argument("--tasks", required=True)
     prepare.add_argument("--output-dir", required=True)
@@ -1549,7 +2257,7 @@ def parser() -> argparse.ArgumentParser:
     prepare.add_argument("--model", default="gpt-5.6-sol")
     prepare.add_argument("--reasoning-effort", choices=("low", "medium", "high"), default="high")
     prepare.add_argument("--max-wall-seconds", type=int, default=600)
-    prepare.add_argument("--max-sources", type=int, default=10)
+    prepare.add_argument("--max-sources", type=int, default=DEFAULT_MAX_SOURCES)
     prepare.set_defaults(handler=command_prepare)
 
     run = commands.add_parser("run", help="Execute pending trials with isolated Codex homes")
@@ -1557,9 +2265,14 @@ def parser() -> argparse.ArgumentParser:
     run.add_argument("--codex", required=True)
     run.add_argument("--source-codex-home", required=True)
     run.add_argument("--target-skill", required=True)
+    run.add_argument(
+        "--holdout-gold",
+        help="Hidden known-lead gold used only to reject treatment-package contamination",
+    )
     run.add_argument("--condition", choices=CONDITIONS)
     run.add_argument("--task")
     run.add_argument("--limit", type=int)
+    run.add_argument("--retry-failed", action="store_true", help="Archive failed responses and retry them")
     run.add_argument("--confirm-live-run", action="store_true")
     run.set_defaults(handler=command_run)
 

@@ -20,11 +20,23 @@ The independent variable is target-Skill presence. The primary outcomes are `nDC
 
 This is a benchmark of one frozen model/tool/Skill configuration. It is not a study of BLV users, does not measure accessibility benefit, and cannot establish exhaustive discovery.
 
+## Discovery And Selection Must Be Reported Separately
+
+Following the distinction used by ResearchArena, do not treat one aggregate relevance score as proof that the Skill discovers more work. Keep two questions separate:
+
+- **Discovery:** did a condition recover the relevant candidate pool, including supplied known leads and candidates that were not named in the prompt?
+- **Selection:** did it place highly relevant, identity-valid candidates near the top of the ranked list?
+
+Known-lead recovery is a useful safety check but is not novel discovery. If a task contains named leads, record them separately from the pooled novel-candidate analysis. Preserve unresolved leads and hard negatives instead of replacing them with popular generic sources.
+
+The current `supervision-retrieval-ab-v1` runner keeps its frozen schema and primary metrics unchanged. A future benchmark revision may add declared aspect labels such as mechanism, implementation, evaluation, failure, and recent work, then report aspect coverage and duplicate rate. Do not retrofit those labels into an already scored run; create a new benchmark ID and rerun both conditions. ResearchArena is an evaluation precedent, not evidence that this Skill generalizes across models or disciplines.
+
 ## Conditions And Isolation
 
 - `baseline`: a fresh temporary `CODEX_HOME` contains only a short-lived link to the existing authentication file. It contains no user Skills and does not load the user's normal configuration or project rules.
 - `skill`: the same isolation is used, but the target Skill directory is copied into the temporary home's `skills/` directory.
 - Both conditions use the same model, reasoning effort, prompt, response schema, internet availability, hard timeout, and source limit.
+- The runner invokes the current Codex CLI's stable top-level `codex --search exec` option for live web retrieval. Do not silently replace it with an experimental feature flag; a CLI change creates a new benchmark version and must be reported.
 - Every trial is ephemeral. Output from one trial is not provided to another.
 - Trial order is randomized from a recorded seed. Repetition and condition remain in the execution manifest but are removed from the pooled judgment file.
 - The runner never copies authentication into the experiment output. Its temporary home is removed after each trial.
@@ -41,6 +53,12 @@ The versioned task set is [supervision-retrieval-ab-tasks.json](supervision-retr
 - All tasks use the same frozen cutoff date and SuperVision constraints: non-jailbroken standalone iPhone, no runtime computer or remote browser, VoiceOver compatibility, bounded memory, and auditable behavior.
 
 Do not change task wording, source limits, model, reasoning effort, timeout, or scoring rules after viewing condition results. A material change creates a new benchmark version.
+
+## Discovery Core v3 Cross-domain Extension
+
+The v3 extension is frozen separately in [cross-domain-discovery-tasks-v1.json](cross-domain-discovery-tasks-v1.json). It targets the missed-source problem across disciplines rather than only seed-to-neighbor tasks in computing. The pilot uses four prompts (health, social science, business, and humanities), two conditions, and two repetitions: 16 trials total. The main set contains eight prompts and adds arts/design/media, experimental science, education, and interdisciplinary public health. Keep v3 manifests, pooled judgments, and scores separate from the legacy `supervision-retrieval-ab-tasks.json` benchmark; their trial counts and task distributions are not interchangeable.
+
+The v3 pilot's execution result is not a retrieval-quality result until its condition-blind pool has been judged. A completed run establishes only completion, runtime, and source-pool construction. Relevance, identity validity, constraint fit, and discovery recall require the same external judgment and scoring procedure described below.
 
 ## Outcomes
 
@@ -75,6 +93,37 @@ The coverage probe is allowed at most one targeted gap query within the existing
 
 Raw source count is not a success criterion. Duplicate, invented, weakly related, or constraint-incompatible sources cannot improve the primary outcomes.
 
+## User-Aligned Discovery Evaluation
+
+The generic v1 task set does not fully measure the user's motivating failure mode: a baseline may return reasonable sources while failing to surface projects or papers that the user would later recognize as valuable. A future benchmark revision must therefore add a separate discovery-recall track instead of changing the meaning of v1 nDCG.
+
+### Frozen task design
+
+- Build a declared reference set from sources the user explicitly supplied or accepted; do not infer it from private social-platform history.
+- Create name-hidden tasks using the source's mechanism, problem, input, outcome, or rough description. The expected source name must not appear in the prompt.
+- Add open discovery tasks with no expected name, plus hard negatives that share a broad topic but lack the target decision or mechanism.
+- Include several domains when cross-disciplinary discovery is claimed.
+- Run baseline, initial Skill, and upgraded Skill against the same prompt, model, tools, cutoff, source limit, timeout, and repetitions.
+
+The reference set is an evaluation target, not a runtime preference profile and not proof that an expected source is universally best. Preserve user labels and reasons separately from the ordinary blind pooled judgment.
+
+### Additional outcomes
+
+Report these alongside the existing selection metrics:
+
+- `known_lead_recovery@k`: expected sources recovered from a name-hidden clue;
+- `baseline_missed_recovery@k`: expected sources found by the Skill but missed by baseline;
+- `user_approved_novel@k`: newly discovered sources later accepted by the user as useful;
+- `mechanism_family_coverage`: direct, alternative, validation, failure, and current families covered;
+- `hard_negative_rate`: broad but low-value sources placed in the primary shortlist;
+- `bridge_completeness`: new candidates with a concrete bridge to the seed.
+- `completed_trial_rate`: valid final answers produced before the hard deadline;
+- `recovery_per_minute` and `recovery_per_10k_tokens`: known-lead recovery normalized by execution cost.
+
+Do not infer user approval from stars, clicks, an LLM judge, or a source's popularity. If the user has not labelled a candidate, report the endpoint as exploratory. A known-lead recovery is not independent discovery, and a longer candidate list is not evidence of improvement. A discovery condition that times out more often or spends materially more tokens must not be declared superior without reporting that cost.
+
+The user-aligned track is the correct test for the claim “the Skill finds valuable sources that ordinary AI search tends to miss.” It does not replace identity verification, pooled relevance judgment, or the existing selection metrics. Create a new benchmark ID before running it; never retrofit these labels into an already scored v1 run.
+
 ## Pooled Blind Judgment
 
 An exhaustive gold set is unavailable. Use pooled judgment:
@@ -104,6 +153,16 @@ python3 scripts/retrieval_ab_benchmark.py validate-tasks \
   --tasks references/supervision-retrieval-ab-tasks.json
 ```
 
+Run the fail-closed contract check before preparing or executing live trials:
+
+```bash
+python3 scripts/preflight_retrieval_experiment.py \
+  --skill-root "$HOME/.codex/skills/research-discovery-and-translation-audit" \
+  --tasks references/supervision-retrieval-ab-tasks.json
+```
+
+The preflight blocks live execution when the baseline and Skill schemas differ, source caps conflict, normalization differs, legacy output rules remain, or the runner and installed target Skill are different versions. A passing run emits a contract fingerprint. The live runner also writes that result to `preflight_report.json` beside the trial manifest.
+
 Prepare a pilot outside the Skill package:
 
 ```bash
@@ -115,20 +174,49 @@ python3 scripts/retrieval_ab_benchmark.py prepare \
   --model gpt-5.6-sol \
   --reasoning-effort high \
   --max-wall-seconds 600 \
-  --max-sources 10 \
+  --max-sources 6 \
   --output-dir /path/to/supervision-retrieval-ab-pilot
 ```
 
 Execute pending trials only after reviewing the manifest. The explicit confirmation flag prevents accidental model/network spending:
 
 ```bash
+python3 scripts/retrieval_ab_benchmark.py stage-treatment \
+  --source-skill . \
+  --output /path/to/holdout-clean-treatment \
+  --holdout-gold /path/outside/the/treatment/hidden-gold.json
+
 python3 scripts/retrieval_ab_benchmark.py run \
   --run-dir /path/to/supervision-retrieval-ab-pilot \
   --codex /path/to/codex \
   --source-codex-home "$HOME/.codex" \
-  --target-skill "$HOME/.codex/skills/research-discovery-and-translation-audit" \
+  --target-skill /path/to/holdout-clean-treatment \
+  --holdout-gold /path/outside/the/installed/skill/hidden-gold.json \
   --confirm-live-run
 ```
+
+The runner treats account quota exhaustion as a batch-level infrastructure
+blocker. It records the failed trial, stops immediately, and leaves later trials
+pending so correlated quota failures do not contaminate the comparison. Ordinary
+retrieval failures and timeouts remain visible trial-level outcomes. Do not score
+a run until every preregistered pair has completed; retry only after the external
+blocker has been resolved.
+
+Known-lead recovery additionally requires a holdout-contamination check. Keep
+gold labels outside the installed runtime package and pass them with
+`--holdout-gold`; execution is blocked if a canonical hidden identifier appears
+anywhere in the treatment Skill. A contaminated run measures memorization or
+packaging leakage, not autonomous source discovery.
+
+The shared query cap is derived from the active runtime profile rather than
+written as a separate prompt constant. A recovery benchmark therefore gives both
+conditions the same six-record ceiling. This prevents a baseline-oriented
+eight-query instruction from contradicting the treatment's six-record recovery
+contract.
+
+The hidden known-lead scorer fails closed when any preregistered response is
+missing, failed, or no longer matches its manifest identity. Partial pairs may be
+inspected for debugging, but they cannot produce an effectiveness result.
 
 Create the blind pool:
 

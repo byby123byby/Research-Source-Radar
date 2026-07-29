@@ -18,6 +18,12 @@ SKILL_NAME = "research-discovery-and-translation-audit"
 PACKAGE_FILE_ENTRIES = ("LICENSE", "SKILL.md", "RELEASE_COMPLETENESS.json")
 PACKAGE_DIRECTORY_ENTRIES = ("agents", "references", "scripts")
 PACKAGE_ENTRIES = (*PACKAGE_FILE_ENTRIES, *PACKAGE_DIRECTORY_ENTRIES)
+BENCHMARK_TREATMENT_EXCLUDED_FILES = {
+    "cross-domain-discovery-tasks-v1.json",
+    "supervision-retrieval-ab-tasks.json",
+    "user-aligned-recovery-gold-v1.json",
+    "user-aligned-recovery-tasks-v1.json",
+}
 USER_TARGETS = {
     "codex-user": Path.home() / ".codex" / "skills" / SKILL_NAME,
     "claude-user": Path.home() / ".claude" / "skills" / SKILL_NAME,
@@ -84,6 +90,18 @@ def fsync_directory(path: Path) -> None:
 
 def package_root() -> Path:
     return Path(__file__).resolve().parents[1]
+
+
+def package_copy_ignore(
+    directory: str,
+    names: list[str],
+    *,
+    benchmark_treatment: bool = False,
+) -> set[str]:
+    ignored = set(shutil.ignore_patterns("__pycache__", "*.pyc", ".DS_Store")(directory, names))
+    if benchmark_treatment:
+        ignored.update(name for name in names if name in BENCHMARK_TREATMENT_EXCLUDED_FILES)
+    return ignored
 
 
 def target_path(target: str, project: Path | None = None) -> Path:
@@ -232,7 +250,13 @@ def reject_symlinked_parent_components(root: Path, destination: Path) -> None:
             raise ValueError(f"project destination contains a symbolic-link path component: {current}")
 
 
-def stage_package(source: Path, destination: Path, *, force: bool) -> Path | None:
+def stage_package(
+    source: Path,
+    destination: Path,
+    *,
+    force: bool,
+    benchmark_treatment: bool = False,
+) -> Path | None:
     source = source.resolve()
     destination = destination.expanduser()
     if path_present(destination) and destination.resolve() == source:
@@ -255,7 +279,11 @@ def stage_package(source: Path, destination: Path, *, force: bool) -> Path | Non
                     item,
                     output,
                     symlinks=True,
-                    ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".DS_Store"),
+                    ignore=lambda directory, names: package_copy_ignore(
+                        directory,
+                        names,
+                        benchmark_treatment=benchmark_treatment,
+                    ),
                 )
             else:
                 shutil.copy2(item, output)

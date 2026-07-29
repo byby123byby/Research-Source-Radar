@@ -46,6 +46,14 @@ Search peer-reviewed research, official/company filings, standards, reputable in
 
 Translation requires source incentives, metric definitions, representativeness, causal limits, cost, implementation risk, and decision-specific uncertainty.
 
+## Financial Quantitative Finance
+
+Search finance and quant-research ecosystems, SEC or regulator filings where relevant, market data documentation, factor/return model archives, reproducibility packets, and method or benchmark publications.
+
+Translation requires return/risk/state variable mapping, estimation assumptions, data availability and survivorship/bias control, compute and infra constraints, governance/compliance constraints, and explicit evaluation boundaries (out-of-sample horizons, transaction-cost models, benchmark comparators, and failure modes).
+
+Do not infer a profitable edge from a leaderboard or anecdote. Keep the separation between causal claim strength, model diagnostics, implementation feasibility, and legal/compliance feasibility.
+
 ## Humanities, Languages, And Cultural Heritage
 
 Search library catalogs, scholarly indexes, primary texts, critical editions, archival finding aids, digitized manuscripts, corpus repositories, citation networks, oral-history records, museum or collection metadata, and authoritative translations. Record the edition, language, provenance, archival status, access restrictions, and uncertainty in attribution or dating.

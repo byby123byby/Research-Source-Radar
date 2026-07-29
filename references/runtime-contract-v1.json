@@ -1,0 +1,94 @@
+{
+  "schema_version": 1,
+  "output": {
+    "single_ranked_list": true,
+    "default_max_sources": 12,
+    "source_roles": [
+      "direct",
+      "mechanism",
+      "validation",
+      "current",
+      "adjacent"
+    ],
+    "normalization": {
+      "applies_equally_to_all_conditions": true,
+      "deduplicate_by_canonical_identity": true,
+      "cap_to_manifest_limit": true,
+      "rerank_contiguously": true,
+      "record_every_change": true
+    }
+  },
+  "profiles": {
+    "fast": {
+      "candidate_pool": {"min": 8, "max": 14},
+      "max_sources": 4,
+      "budget": {"batched_search_calls": 2, "query_records": 5, "targeted_opens": 1, "gap_probes": 1},
+      "early_stop": {
+        "min_identity_valid_candidates": 4,
+        "min_distinct_families": 3,
+        "stop_after_first_batch_when_covered": true,
+        "allow_one_gap_probe_when_incomplete": true,
+        "minimum_discovery_lanes": 3
+      },
+      "network_policy": {
+        "soft_timeout_seconds": 8,
+        "hard_timeout_seconds": 15,
+        "same_query_retries": 0,
+        "on_timeout": "record_gap_and_continue"
+      }
+    },
+    "recovery": {
+      "candidate_pool": {"min": 10, "max": 20},
+      "max_sources": 12,
+      "budget": {"batched_search_calls": 2, "query_records": 6, "targeted_opens": 2, "gap_probes": 1},
+      "early_stop": {
+        "min_identity_valid_candidates": 5,
+        "min_distinct_families": 4,
+        "stop_after_first_batch_when_covered": true,
+        "allow_one_gap_probe_when_incomplete": true,
+        "minimum_discovery_lanes": 4
+      },
+      "network_policy": {
+        "soft_timeout_seconds": 8,
+        "hard_timeout_seconds": 20,
+        "same_query_retries": 0,
+        "on_timeout": "record_gap_and_continue"
+      },
+      "completion_policy": {
+        "reserve_finalization_seconds": 60,
+        "stop_new_discovery_after_seconds": 210,
+        "finalize_from_verified_ledger_on_deadline": true,
+        "gap_probe_counts_toward_query_records": true
+      }
+    },
+    "standard": {
+      "candidate_pool": {"min": 18, "max": 30},
+      "max_sources": 8,
+      "budget": {"batched_search_calls": 3, "query_records": 8, "targeted_opens": 3, "gap_probes": 1},
+      "early_stop": {
+        "min_identity_valid_candidates": 6,
+        "min_distinct_families": 4,
+        "stop_after_first_batch_when_covered": false,
+        "allow_one_gap_probe_when_incomplete": true,
+        "minimum_discovery_lanes": 4
+      },
+      "network_policy": {
+        "soft_timeout_seconds": 12,
+        "hard_timeout_seconds": 30,
+        "same_query_retries": 0,
+        "on_timeout": "record_gap_and_continue"
+      }
+    }
+  },
+  "recovery": {
+    "required_families": [
+      "task_decomposition",
+      "mechanism_neighbor",
+      "artifact_or_ecosystem",
+      "validation_or_failure",
+      "current_or_attention"
+    ],
+    "minimum_attempted_families": 4,
+    "required_lanes": ["mechanism", "artifact", "validation", "attention"]
+  }
+}
