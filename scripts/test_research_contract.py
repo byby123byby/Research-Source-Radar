@@ -486,7 +486,8 @@ class ResearchContractTests(unittest.TestCase):
 
             report = root / "report.md"
             rc.write_text_atomic(report, "report\n", default_mode=0o644)
-            self.assertEqual(0o644, stat.S_IMODE(report.stat().st_mode))
+            if os.name != "nt":
+                self.assertEqual(0o644, stat.S_IMODE(report.stat().st_mode))
 
     def test_atomic_writers_sync_parent_directory_after_replace(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -1249,8 +1250,9 @@ class ResearchContractTests(unittest.TestCase):
             self.assertEqual(1, agents_text.count(installer.MANAGED_END))
             self.assertEqual(1, gemini_text.count(installer.MANAGED_BEGIN))
             self.assertIn(f".agent-skills/{installer.SKILL_NAME}/SKILL.md", gemini_text)
-            self.assertEqual(0o640, stat.S_IMODE(agents.stat().st_mode))
-            self.assertEqual(0o644, stat.S_IMODE((project / "GEMINI.md").stat().st_mode))
+            if os.name != "nt":
+                self.assertEqual(0o640, stat.S_IMODE(agents.stat().st_mode))
+                self.assertEqual(0o644, stat.S_IMODE((project / "GEMINI.md").stat().st_mode))
 
     def test_portable_install_rolls_back_package_and_instructions_on_partial_failure(self):
         with tempfile.TemporaryDirectory() as directory:

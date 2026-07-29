@@ -473,7 +473,7 @@ def file_state(info: os.stat_result) -> FileState:
             0,
             0,
             info.st_size,
-            getattr(info, "st_mtime_ns", int(info.st_mtime * 1_000_000_000)),
+            0,
             0,
         )
     return (

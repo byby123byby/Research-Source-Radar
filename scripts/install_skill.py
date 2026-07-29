@@ -432,6 +432,8 @@ def file_mode(path: Path, *, default: int) -> int:
 
 
 def instruction_file_state(info: os.stat_result) -> InstructionState:
+    if os.name == "nt":
+        return (0, 0, info.st_size, 0, 0)
     return (
         info.st_dev,
         info.st_ino,

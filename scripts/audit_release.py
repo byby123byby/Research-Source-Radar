@@ -83,10 +83,7 @@ def path_is_excluded(relative: Path, manifest_relative: Path | None) -> bool:
 
 def stable_file_state(info: os.stat_result) -> tuple[int, ...]:
     if os.name == "nt":
-        return (
-            info.st_size,
-            getattr(info, "st_mtime_ns", int(info.st_mtime * 1_000_000_000)),
-        )
+        return (info.st_size,)
     return (
         info.st_dev,
         info.st_ino,
