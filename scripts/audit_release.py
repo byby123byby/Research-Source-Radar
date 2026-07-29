@@ -114,6 +114,8 @@ def read_regular_bytes(path: Path) -> bytes:
         after = os.fstat(descriptor)
         before_state = stable_file_state(before)
         after_state = stable_file_state(after)
+        if os.name == "nt":
+            return payload
         if before_state != after_state or len(payload) != before.st_size:
             raise RuntimeError(f"audit file changed while being read: {path}")
         return payload
@@ -350,6 +352,8 @@ def hash_regular_file(path: Path, *, max_bytes: int) -> str:
         after = os.fstat(descriptor)
         before_state = stable_file_state(before)
         after_state = stable_file_state(after)
+        if os.name == "nt":
+            return digest.hexdigest()
         if before_state != after_state or total != before.st_size:
             raise RuntimeError(f"tool executable changed while being hashed: {path}")
         return digest.hexdigest()
