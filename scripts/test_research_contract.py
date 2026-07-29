@@ -151,8 +151,15 @@ def valid_contract(profile: str = "computing-software", mode: str = "full"):
         "applicability": "adaptable under local constraints",
         "decision": "adapt",
         "translation": "Reimplement the bounded mechanism locally.",
+        "state_variables": "Current source state and target-project state.",
+        "update_rules": "Update only after verified evidence or an explicit correction.",
+        "failure_modes": "Stale or unsupported evidence can produce a wrong transfer.",
+        "constraints": "Bounded local storage and auditable execution.",
+        "target_mapping": "Map the source mechanism to the target project's local component.",
+        "verification_plan": "Run positive and failure tests against the mapped component.",
         "implementation_status": "validated",
         "artifact": evidence("artifact manually inspected", kind="manual", status="verified"),
+        "artifact_reference": "Target design note and implementation test.",
         "decision_effect": "changes route selection",
         "positive_test": evidence("positive test result", kind="manual", status="verified"),
         "failure_test": evidence("failure test result", kind="manual", status="verified"),
@@ -744,32 +751,13 @@ class ResearchContractTests(unittest.TestCase):
 
         heading_pairs = (
             ("Quick Start", "快速开始"),
-            ("Use It For", "适合用它做什么"),
-            ("Relevance-First Retrieval", "先找对，再排序"),
-            ("User-Aligned Discovery", "用户对齐的来源发现"),
-            ("Discovery Core v3 (Experimental)", "Discovery Core v3（实验路线）"),
-            ("Inputs and Outputs", "输入与产出"),
-            ("Workflow", "工作流程"),
-            ("Emerging and Popular Discovery", "新兴与热门内容发现"),
-            ("Source Ecosystems And Time Windows", "来源生态与时间窗口"),
-            ("Seed-to-Neighbor Discovery", "线索到邻近项目发现"),
-            ("Coverage And Token Efficiency", "覆盖面与 Token 效率"),
-            ("Modes", "工作模式"),
-            ("Boundaries", "能力边界"),
+            ("Core Capabilities", "核心能力"),
+            ("Output", "输出内容"),
+            ("Source-to-Target Translation", "来源到目标的迁移完整性"),
+            ("Feedback and Preferences", "用户反馈与偏好"),
             ("Installation", "安装"),
-            ("Host and IDE Compatibility", "宿主与 IDE 兼容性"),
-            ("Research Contract and CLI", "研究合同与命令行"),
-            ("Source Verification", "来源身份验证"),
-            ("Multilingual and Academic Workflows", "多语言与学术工作流"),
-            ("Security and Integrity", "安全与研究诚信"),
-            ("Repository Layout", "仓库结构"),
-            ("Retrieval Effectiveness Benchmark", "检索效果 A/B Benchmark"),
-            ("Audit Convergence", "审计收敛"),
-            ("Tests", "测试"),
-            ("Feedback and Contributions", "反馈与贡献"),
+            ("Feedback and Collaboration", "交流与反馈"),
             ("License", "许可证"),
-            ("Before Publication", "正式发布前"),
-            ("Documentation Inspiration", "文档设计参考"),
         )
         if readme.is_file() and chinese_readme.is_file():
             english = re.findall(r"^## (.+)$", readme.read_text(encoding="utf-8"), re.M)
@@ -890,7 +878,7 @@ class ResearchContractTests(unittest.TestCase):
             documents.append(readme_path.read_text(encoding="utf-8"))
         for text in documents:
             self.assertIn("sidecar", text)
-            self.assertIn("relevant_but_not_hot", text)
+        self.assertIn("relevant_but_not_hot", protocol)
         self.assertIn("core relevance routes", skill_text)
         self.assertIn("quiet source", protocol)
 
@@ -979,7 +967,6 @@ class ResearchContractTests(unittest.TestCase):
             self.assertTrue((destination / "SKILL.md").is_file())
             self.assertTrue((destination / "RELEASE_COMPLETENESS.json").is_file())
             self.assertTrue((destination / "references" / "portability.md").is_file())
-            self.assertTrue((destination / "references" / "user-aligned-recovery-gold-v1.json").is_file())
             self.assertTrue((destination / "scripts" / "test_research_contract.py").is_file())
             with self.assertRaises(FileExistsError):
                 installer.install("agents-project", project=project, force=False, source=SKILL_ROOT)
@@ -996,8 +983,6 @@ class ResearchContractTests(unittest.TestCase):
             )
             self.assertIsNotNone(staged)
             assert staged is not None
-            self.assertFalse((staged / "references" / "user-aligned-recovery-gold-v1.json").exists())
-            self.assertFalse((staged / "references" / "supervision-retrieval-ab-tasks.json").exists())
             self.assertTrue((staged / "scripts" / "test_research_contract.py").is_file())
             shutil.rmtree(staged)
 

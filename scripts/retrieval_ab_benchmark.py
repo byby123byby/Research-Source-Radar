@@ -28,15 +28,14 @@ from runtime_contract import DEFAULT_MAX_SOURCES, PROFILE_CONTRACTS, SOURCE_ROLE
 
 
 SCHEMA_VERSION = 1
-BENCHMARK_ID = "supervision-retrieval-ab-v1"
+BENCHMARK_ID = "research-source-radar-cross-domain-v3-v1"
 SUPPORTED_BENCHMARK_IDS = {
     BENCHMARK_ID,
     "research-source-radar-user-aligned-v1",
-    "research-source-radar-cross-domain-v3-v1",
 }
 RECOVERY_BENCHMARK_IDS = {
     "research-source-radar-user-aligned-v1",
-    "research-source-radar-cross-domain-v3-v1",
+    BENCHMARK_ID,
 }
 HOLDOUT_BENCHMARK_IDS = {"research-source-radar-user-aligned-v1"}
 

@@ -17,8 +17,8 @@ import retrieval_ab_benchmark as ab
 
 
 SKILL_ROOT = Path(__file__).resolve().parents[1]
-TASK_FILE = SKILL_ROOT / "references" / "supervision-retrieval-ab-tasks.json"
 CROSS_DOMAIN_TASK_FILE = SKILL_ROOT / "references" / "cross-domain-discovery-tasks-v1.json"
+TASK_FILE = CROSS_DOMAIN_TASK_FILE
 
 
 def benchmark_tasks():
@@ -56,17 +56,20 @@ def answer(source_suffix="baseline", relevance_text="useful"):
                 "popularity_evidence": [],
             }
         ],
-        "queries": [{"query": f"query {source_suffix}", "source": "GitHub"}],
+        "queries": [
+            {"query": f"query {source_suffix}", "source": "GitHub"},
+            {"query": f"mechanism query {source_suffix}", "source": "scholarly index"},
+        ],
         "gaps": ["fixture gap"],
         "constraint_notes": ["fixture constraint"],
         "discovery_trace": discovery_trace(),
     }
 
 
-def discovery_trace(mode="used"):
+def discovery_trace(mode="used", route="fast"):
     return {
         "mode": mode,
-        "route": "fast",
+        "route": route,
         "attempted_families": ["task_decomposition", "mechanism_neighbor"],
         "covered_families": ["task_decomposition"],
         "uncovered_families": ["validation_or_failure"],
@@ -116,6 +119,13 @@ def exploration_item(title="Exploration lead"):
 
 
 def response_for(trial, result, *, tokens=100, wall=60.0, status="completed"):
+    answer_value = None
+    if status == "completed":
+        answer_value = copy.deepcopy(result)
+        answer_value["discovery_trace"] = discovery_trace(
+            mode="not_used" if trial["condition"] == "baseline" else "used",
+            route="fast" if trial["condition"] == "baseline" else "recovery",
+        )
     return {
         "schema_version": ab.SCHEMA_VERSION,
         "trial_id": trial["trial_id"],
@@ -135,7 +145,7 @@ def response_for(trial, result, *, tokens=100, wall=60.0, status="completed"):
             "event_log_sha256": "0" * 64,
             "error": "" if status == "completed" else "fixture failure",
         },
-        "answer": result if status == "completed" else None,
+        "answer": answer_value,
     }
 
 
@@ -152,12 +162,12 @@ class RetrievalABBenchmarkTests(unittest.TestCase):
             max_sources=ab.DEFAULT_MAX_SOURCES,
         )
 
-    def test_real_task_set_is_valid_and_has_frozen_sizes(self):
+    def test_public_task_set_is_valid_and_has_frozen_sizes(self):
         data = benchmark_tasks()
         self.assertEqual([], ab.validate_tasks(data))
-        self.assertEqual(30, len(data["tasks"]))
-        self.assertEqual(8, len(data["task_sets"]["pilot"]))
-        self.assertEqual(30, len(data["task_sets"]["main"]))
+        self.assertEqual(8, len(data["tasks"]))
+        self.assertEqual(4, len(data["task_sets"]["pilot"]))
+        self.assertEqual(8, len(data["task_sets"]["main"]))
         self.assertEqual(list(ab.PRIMARY_METRICS), data["primary_metrics"])
 
     def test_cross_domain_v3_task_set_is_valid_and_discipline_diverse(self):
@@ -556,21 +566,16 @@ class RetrievalABBenchmarkTests(unittest.TestCase):
     def test_stage_treatment_excludes_real_holdout_from_runtime_package(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "treatment"
+            gold = Path(directory) / "gold.json"
+            gold.write_text(json.dumps({"lead_sets": {}}), encoding="utf-8")
             args = Namespace(
                 source_skill=str(SKILL_ROOT),
                 output=str(output),
-                holdout_gold=str(SKILL_ROOT / "references" / "user-aligned-recovery-gold-v1.json"),
+                holdout_gold=str(gold),
             )
             self.assertEqual(0, ab.command_stage_treatment(args))
             self.assertTrue((output / "SKILL.md").is_file())
-            self.assertFalse((output / "references" / "user-aligned-recovery-gold-v1.json").exists())
-            self.assertEqual(
-                [],
-                ab.find_holdout_leaks(
-                    output,
-                    SKILL_ROOT / "references" / "user-aligned-recovery-gold-v1.json",
-                ),
-            )
+            self.assertEqual([], ab.find_holdout_leaks(output, gold))
 
     def test_response_must_match_manifest_and_failed_response_cannot_contain_answer(self):
         manifest, _ = self.prepared()
@@ -859,7 +864,12 @@ class RetrievalABBenchmarkTests(unittest.TestCase):
                     condition_has_skill = any((isolated_home / "skills").iterdir())
                     observed.append(condition_has_skill)
                     output_index = self.command.index("--output-last-message") + 1
-                    Path(self.command[output_index]).write_text(json.dumps(answer("runner")), encoding="utf-8")
+                    value = answer("runner")
+                    value["discovery_trace"] = discovery_trace(
+                        mode="used" if condition_has_skill else "not_used",
+                        route="recovery" if condition_has_skill else "fast",
+                    )
+                    Path(self.command[output_index]).write_text(json.dumps(value), encoding="utf-8")
                     events = json.dumps({"usage": {"input_tokens": 120, "output_tokens": 30}})
                     return events, ""
 

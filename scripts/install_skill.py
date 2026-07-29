@@ -20,9 +20,6 @@ PACKAGE_DIRECTORY_ENTRIES = ("agents", "references", "scripts")
 PACKAGE_ENTRIES = (*PACKAGE_FILE_ENTRIES, *PACKAGE_DIRECTORY_ENTRIES)
 BENCHMARK_TREATMENT_EXCLUDED_FILES = {
     "cross-domain-discovery-tasks-v1.json",
-    "supervision-retrieval-ab-tasks.json",
-    "user-aligned-recovery-gold-v1.json",
-    "user-aligned-recovery-tasks-v1.json",
 }
 USER_TARGETS = {
     "codex-user": Path.home() / ".codex" / "skills" / SKILL_NAME,

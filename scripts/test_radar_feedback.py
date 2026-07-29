@@ -13,7 +13,7 @@ import radar_feedback as radar
 class RadarFeedbackTests(unittest.TestCase):
     def profile(self):
         return radar.make_profile(
-            "SuperVision",
+            "ExampleProject",
             "发现能推动独立 iOS 无障碍 Agent 的研究机会",
             ["非越狱", "中文输出"],
         )
@@ -145,7 +145,7 @@ class RadarFeedbackTests(unittest.TestCase):
         first_reason = review.find("你的理由：`待填写`")
         review = review[:first_reason] + review[first_reason:].replace("你的理由：`待填写`", "你的理由：`有稳定机制桥接`", 1)
         proposal = radar.extract_review_feedback(review, radar.validate_candidates(self.candidates()))
-        self.assertEqual("uncertain", proposal[0]["label"])
+        self.assertEqual("reference_only", proposal[0]["label"])
         self.assertEqual("mechanism_to_borrow", proposal[1]["label"])
 
     def test_explicit_very_average_label_is_not_promoted(self):
@@ -157,7 +157,7 @@ class RadarFeedbackTests(unittest.TestCase):
         first_reason = review.find("你的理由：`待填写`")
         review = review[:first_reason] + review[first_reason:].replace("你的理由：`待填写`", "你的理由：`直接相关`", 1)
         proposal = radar.extract_review_feedback(review, radar.validate_candidates(self.candidates()))
-        self.assertEqual("not_useful_now", proposal[0]["label"])
+        self.assertEqual("reference_only", proposal[0]["label"])
         self.assertEqual("mechanism_to_borrow", proposal[1]["label"])
 
     def test_original_uncertainty_overrides_a_borrow_keyword(self):
@@ -229,7 +229,7 @@ class RadarFeedbackTests(unittest.TestCase):
             feedback_path.write_text(json.dumps(self.feedback(), ensure_ascii=False), encoding="utf-8")
             script = Path(radar.__file__).resolve()
             init = subprocess.run(
-                [sys.executable, str(script), "init", "--output", str(profile_path), "--project-name", "SuperVision", "--description", "中文研究雷达"],
+                [sys.executable, str(script), "init", "--output", str(profile_path), "--project-name", "ExampleProject", "--description", "中文研究雷达"],
                 capture_output=True,
                 text=True,
                 check=False,

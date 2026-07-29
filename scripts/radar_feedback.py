@@ -307,15 +307,15 @@ def normalize_review_label(raw_label: str, raw_reason: str) -> str:
         return "already_known"
     if any(token in combined for token in ("不想再推荐", "不要再推荐", "别再推荐", "避免这类", "不看")):
         return "avoid_similar"
-    weak_tokens = ("一般般", "可以看看", "值得看看", "不是很重要", "不用重点", "可不看", "不重点", "可能可以", "感觉没用")
+    if any(token in combined for token in ("不确定", "不知道", "还需要验证", "需要先验证", "待验证")):
+        return "uncertain"
+    weak_tokens = ("一般般", "可以看看", "值得看看", "不是很重要", "不用重点", "可不看", "不重点", "感觉没用")
     if any(token in combined for token in weak_tokens):
         return "reference_only"
     if any(token in combined for token in ("值得深入", "重点看", "非常想", "很想深入", "夯", "多推荐", "好好看看", "值得做迁移", "多读")):
         return "worth_deepening"
     if any(token in combined for token in ("暂时没用", "没有那么想要", "当前不需要")):
         return "not_useful_now"
-    if any(token in combined for token in ("不确定", "不知道")):
-        return "uncertain"
     if any(token in combined for token in ("可借鉴机制", "可以借鉴", "可迁移", "迁移机制", "机制参考")):
         return "mechanism_to_borrow"
     if any(token in combined for token in ("值得看", "可以看", "参考", "相关")):

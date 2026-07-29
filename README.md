@@ -27,7 +27,7 @@ The Skill treats the examples as a visible, task-local preference hypothesis and
 - **Direct problem matches:** papers, projects, datasets, standards, official documents, and methods that address the target directly.
 - **Mechanism neighbors:** sources connected by state representation, update rules, training methods, metrics, data workflows, or validation rather than by name alone.
 - **Cross-domain transfer:** connections across computing, life science, health, social science, quantitative finance, law and policy, humanities, arts, design, education, and multidisciplinary research.
-- **Hot and recent discovery:** GitHub activity, community attention, recent papers, and technical coverage as discovery entrances, with the timing and evidence of attention stated separately.
+- **Hot and recent discovery:** GitHub activity, community attention, recent papers, and technical coverage as a sidecar discovery lane, with the timing and evidence of attention stated separately rather than replacing direct problem search.
 - **Long-tail recovery:** less popular sources with clear mechanisms, strong validation, or meaningful project value.
 - **Source verification:** canonical papers, official project pages, repositories, dataset pages, standards, and other primary sources.
 - **Actionable ranking:** direct use, adaptation, mechanism transfer, light reference, and unresolved status are kept separate so relevance is not treated as deep priority.
@@ -92,9 +92,9 @@ Native Agent Skills hosts may use the compatibility name `$research-discovery-an
 
 ## Feedback and Collaboration
 
-If you run into a problem, find a source-verification error, have a feature idea, or want support for another field, please open an [Issue](https://github.com/byby123byby/by-Research-Source-Radar/issues). Include the use case, input, actual output, and expected result when possible.
+If you run into a problem, find a source-verification error, have a feature idea, or want support for another field, please open an [Issue](https://github.com/byby123byby/Research-Source-Radar/issues). Include the use case, input, actual output, and expected result when possible.
 
-If this Skill is useful to you, a [Star on GitHub](https://github.com/byby123byby/by-Research-Source-Radar) is appreciated. If you are interested in research-source discovery, cross-disciplinary search, or Skill design, feel free to [contact me on GitHub](https://github.com/byby123byby) to exchange ideas or discuss collaboration.
+If this Skill is useful to you, a [Star on GitHub](https://github.com/byby123byby/Research-Source-Radar) is appreciated. If you are interested in research-source discovery, cross-disciplinary search, or Skill design, feel free to [contact me on GitHub](https://github.com/byby123byby) to exchange ideas or discuss collaboration.
 
 ## License
 

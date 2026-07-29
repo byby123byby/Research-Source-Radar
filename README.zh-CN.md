@@ -27,7 +27,7 @@ Skill 会把这些来源作为当前任务的可见偏好假设，和真正新�
 - **问题直连**：寻找直接解决目标问题的论文、项目、数据集、标准、官方文档和方法。
 - **机制邻居**：沿着状态表示、更新规则、训练方法、测量指标、数据流程或验证方式寻找不一定同名的来源。
 - **跨学科迁移**：连接计算机、生命科学、健康、社会科学、金融量化、法律政策、人文、艺术、设计、教育和其他研究领域。
-- **热门与近期发现**：把 GitHub 活跃度、社区关注、论文新近发布和技术报道作为发现入口，同时单独说明热度时间与证据。
+- **热门与近期发现**：把 GitHub 活跃度、社区关注、论文新近发布和技术报道作为补充发现入口，同时单独说明热度时间与证据，不替代问题直连检索。
 - **长尾恢复**：寻找不热门但机制清楚、验证充分或可能推动项目的来源。
 - **真实来源核验**：优先定位论文原文、官方项目页、规范 GitHub 仓库、数据集主页、标准文本或其他一手来源。
 - **可行动排序**：区分直接可用、需要适配、只能借鉴机制、只作参考和待核实，不把“相关”平均当成“值得深入”。
@@ -92,9 +92,9 @@ $CODEX_HOME/skills/research-discovery-and-translation-audit/
 
 ## 交流与反馈
 
-遇到使用问题、发现来源核验错误、想建议新功能或希望支持其他学科，欢迎在 [Issues](https://github.com/byby123byby/by-Research-Source-Radar/issues) 提出。请尽量写清楚使用场景、输入、实际输出和你期待的结果，这样更方便定位问题。
+遇到使用问题、发现来源核验错误、想建议新功能或希望支持其他学科，欢迎在 [Issues](https://github.com/byby123byby/Research-Source-Radar/issues) 提出。请尽量写清楚使用场景、输入、实际输出和你期待的结果，这样更方便定位问题。
 
-如果这个 Skill 对你有帮助，欢迎在 [GitHub 仓库](https://github.com/byby123byby/by-Research-Source-Radar) 点个 Star。对研究来源发现、跨学科检索或 Skill 设计感兴趣，也欢迎通过 [GitHub](https://github.com/byby123byby) 联系我，交流想法或合作。
+如果这个 Skill 对你有帮助，欢迎在 [GitHub 仓库](https://github.com/byby123byby/Research-Source-Radar) 点个 Star。对研究来源发现、跨学科检索或 Skill 设计感兴趣，也欢迎通过 [GitHub](https://github.com/byby123byby) 联系我，交流想法或合作。
 
 ## 许可证
 

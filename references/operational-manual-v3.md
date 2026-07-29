@@ -419,7 +419,7 @@ python3 scripts/audit_release.py --strict-tools
 
 ### 12. Evaluate Retrieval Effectiveness Separately
 
-Do not use schema tests, source-verification tests, or release convergence as evidence that this Skill retrieves more useful work than an unskilled baseline. For a comparative claim, read [retrieval-ab-evaluation.md](../references/retrieval-ab-evaluation.md) and use the frozen [SuperVision retrieval task set](../references/supervision-retrieval-ab-tasks.json) with `scripts/retrieval_ab_benchmark.py`.
+Do not use schema tests, source-verification tests, or release convergence as evidence that this Skill retrieves more useful work than an unskilled baseline. For a comparative claim, read [retrieval-ab-evaluation.md](../references/retrieval-ab-evaluation.md), provide a frozen task set outside the public package, and use `scripts/retrieval_ab_benchmark.py`.
 
 Hold the model, tools, cutoff date, prompt, timeout, source limit, and execution environment constant. Change only whether this target Skill is installed. Randomize paired trials, use fresh contexts, pool sources across both conditions, remove condition labels before judgment, and score the preregistered primary metrics. Keep failed trials and inconclusive intervals visible. A judged A/B run supports only a dated benchmark claim; it does not prove exhaustive discovery or general benefit across models, domains, and future source indexes.
 

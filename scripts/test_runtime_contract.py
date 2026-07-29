@@ -20,8 +20,8 @@ class RuntimeContractTests(unittest.TestCase):
     def test_runtime_contract_is_valid_and_uses_one_ranked_list(self):
         self.assertEqual([], runtime.validate_runtime_contract(runtime.RUNTIME_CONTRACT))
         self.assertTrue(runtime.OUTPUT_CONTRACT["single_ranked_list"])
-        self.assertEqual(6, runtime.DEFAULT_MAX_SOURCES)
-        self.assertEqual(6, runtime.PROFILE_CONTRACTS["recovery"]["max_sources"])
+        self.assertEqual(12, runtime.DEFAULT_MAX_SOURCES)
+        self.assertEqual(12, runtime.PROFILE_CONTRACTS["recovery"]["max_sources"])
         recovery = runtime.PROFILE_CONTRACTS["recovery"]
         self.assertEqual(6, recovery["budget"]["query_records"])
         self.assertEqual(60, recovery["completion_policy"]["reserve_finalization_seconds"])

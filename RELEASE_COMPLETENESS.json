@@ -37,6 +37,10 @@
     {
       "id": "REQ-EVAL-009",
       "locator": {"path": "references/release-requirements.md", "marker": "## REQ-EVAL-009"}
+    },
+    {
+      "id": "REQ-FEEDBACK-010",
+      "locator": {"path": "references/release-requirements.md", "marker": "## REQ-FEEDBACK-010"}
     }
   ],
   "capabilities": [
@@ -44,8 +48,9 @@
       "id": "reproducible-discovery",
       "requirement_ids": ["REQ-DISCOVERY-001"],
       "public_claims": [
-        {"path": "SKILL.md", "marker": "### 4. Search In Two Independent Lanes"},
+        {"path": "references/operational-manual-v3.md", "marker": "### 4. Search In Two Independent Lanes"},
         {"path": "references/discovery-protocol.md", "marker": "## Two-Lane Discovery"},
+        {"path": "references/source-ecosystems-and-time-windows.md", "marker": "## 1. Select The Ecosystem Profile"},
         {"path": "references/domain-profiles.md", "marker": "## Humanities, Languages, And Cultural Heritage"},
         {"path": "references/domain-profiles.md", "marker": "## Arts, Design, And Media"}
       ],
@@ -54,7 +59,7 @@
         {"path": "scripts/research_contract.py", "marker": "\"query_families\""}
       ],
       "triggers": [
-        {"path": "SKILL.md", "marker": "Default to `full`"}
+        {"path": "SKILL.md", "marker": "Use the smallest route that answers the request"}
       ],
       "behaviors": [
         {"path": "scripts/research_contract.py", "marker": "def validate_contract("}
@@ -75,7 +80,8 @@
       ],
       "documentation": [
         {"path": "references/discovery-protocol.md", "marker": "# Discovery Protocol"},
-        {"path": "references/contract-schema.md", "marker": "## Exact query execution"}
+        {"path": "references/contract-schema.md", "marker": "## Exact query execution"},
+        {"path": "references/source-ecosystems-and-time-windows.md", "marker": "## 5. Required Reporting"}
       ],
       "residual_boundaries": [
         "Search coverage is dated and bounded; unindexed, private, inaccessible, or future work may be missed."
@@ -85,7 +91,7 @@
       "id": "authoritative-identity-and-snapshots",
       "requirement_ids": ["REQ-IDENTITY-002"],
       "public_claims": [
-        {"path": "SKILL.md", "marker": "### 6. Verify Source Identity Before Selection"},
+        {"path": "references/operational-manual-v3.md", "marker": "### 6. Verify Source Identity Before Selection"},
         {"path": "references/contract-schema.md", "marker": "## Authoritative source identity"}
       ],
       "data_representation": [
@@ -97,18 +103,23 @@
       ],
       "behaviors": [
         {"path": "scripts/research_contract.py", "marker": "def verify_candidate_source("},
-        {"path": "scripts/research_contract.py", "marker": "def verify_candidate_snapshot("}
+        {"path": "scripts/research_contract.py", "marker": "def verify_candidate_snapshot("},
+        {"path": "scripts/research_contract.py", "marker": "class PageMetadataParser("},
+        {"path": "scripts/response_identity_gate.py", "marker": "def gate("}
       ],
       "outputs": [
         {"path": "scripts/research_contract.py", "marker": "ONLINE_IDENTITY_PASS"}
       ],
       "positive_tests": [
         {"path": "scripts/test_research_contract.py", "marker": "def test_github_commit_snapshot_is_verified("},
-        {"path": "scripts/test_research_contract.py", "marker": "def test_doi_verification_matches_title("}
+        {"path": "scripts/test_research_contract.py", "marker": "def test_doi_verification_matches_title("},
+        {"path": "scripts/test_research_contract.py", "marker": "def test_page_metadata_parser_prefers_structured_citation_title("},
+        {"path": "scripts/test_response_identity_gate.py", "marker": "def test_display_title_accepts_normal_source_variants("}
       ],
       "negative_tests": [
         {"path": "scripts/test_research_contract.py", "marker": "def test_real_identifier_with_wrong_title_is_rejected("},
-        {"path": "scripts/test_research_contract.py", "marker": "def test_online_verification_detects_snapshot_drift("}
+        {"path": "scripts/test_research_contract.py", "marker": "def test_online_verification_detects_snapshot_drift("},
+        {"path": "scripts/test_response_identity_gate.py", "marker": "def test_official_page_without_title_metadata_is_unresolved("}
       ],
       "migration_compatibility": [
         {"path": "scripts/research_contract.py", "marker": "candidate.setdefault(\"source_identity\""}
@@ -125,17 +136,17 @@
       "id": "seed-to-neighbor-discovery",
       "requirement_ids": ["REQ-SEED-003"],
       "public_claims": [
-        {"path": "SKILL.md", "marker": "### 6A. Expand A User-Shared Seed Without A Profile"},
+        {"path": "references/operational-manual-v3.md", "marker": "### 6A. Expand A User-Shared Seed Without A Profile"},
         {"path": "references/seed-to-neighbor-discovery.md", "marker": "## 6. Required Output"},
-        {"path": "SKILL.md", "marker": "### Adaptive Coverage And Token Budget"},
-        {"path": "SKILL.md", "marker": "### Multi-Path Fusion And Two-Stage Reranking"},
-        {"path": "SKILL.md", "marker": "### User-Seed Recovery And Hard-Negative Gate"}
+        {"path": "references/operational-manual-v3.md", "marker": "### Adaptive Coverage And Token Budget"},
+        {"path": "references/operational-manual-v3.md", "marker": "### Multi-Path Fusion And Two-Stage Reranking"},
+        {"path": "references/operational-manual-v3.md", "marker": "### User-Seed Recovery And Hard-Negative Gate"}
       ],
       "data_representation": [
         {"path": "scripts/research_contract.py", "marker": "def seed_discovery_template("}
       ],
       "triggers": [
-        {"path": "SKILL.md", "marker": "discovered_via: [\"user_seed\"]"}
+        {"path": "references/operational-manual-v3.md", "marker": "discovered_via: [\"user_seed\"]"}
       ],
       "behaviors": [
         {"path": "scripts/research_contract.py", "marker": "def validate_seed_discovery("}
@@ -173,11 +184,15 @@
       "id": "bounded-trend-discovery",
       "requirement_ids": ["REQ-TREND-004"],
       "public_claims": [
-        {"path": "SKILL.md", "marker": "trend-discovery section"},
-        {"path": "references/discovery-protocol.md", "marker": "## Emerging And Popular-Source Discovery"}
+        {"path": "references/operational-manual-v3.md", "marker": "trend-discovery section"},
+        {"path": "references/discovery-protocol.md", "marker": "## Emerging And Popular-Source Discovery"},
+        {"path": "references/source-ecosystems-and-time-windows.md", "marker": "## 2. Use Separate Time Horizons"},
+        {"path": "references/operational-manual-v3.md", "marker": "Never let a trend route replace the core relevance routes."}
       ],
       "data_representation": [
-        {"path": "scripts/research_contract.py", "marker": "\"trend_discovery\""}
+        {"path": "scripts/research_contract.py", "marker": "\"trend_discovery\""},
+        {"path": "scripts/research_contract.py", "marker": "\"time_horizons\""},
+        {"path": "scripts/research_contract.py", "marker": "\"ecosystem_profiles\""}
       ],
       "triggers": [
         {"path": "scripts/research_contract.py", "marker": "scope.trend_requirement=required"}
@@ -189,18 +204,22 @@
         {"path": "scripts/research_contract.py", "marker": "### Emerging and popular-source signals"}
       ],
       "positive_tests": [
-        {"path": "scripts/test_research_contract.py", "marker": "def test_completed_trend_sweep_is_valid_and_routes_candidate("}
+        {"path": "scripts/test_research_contract.py", "marker": "def test_completed_trend_sweep_is_valid_and_routes_candidate("},
+        {"path": "scripts/test_research_contract.py", "marker": "def test_source_ecosystems_and_time_windows_are_explicit_and_bounded("},
+        {"path": "scripts/test_research_contract.py", "marker": "def test_trend_route_is_documented_as_a_sidecar_not_a_recall_replacement("}
       ],
       "negative_tests": [
         {"path": "scripts/test_research_contract.py", "marker": "def test_trend_popularity_cannot_be_promoted_to_evidence_quality("},
-        {"path": "scripts/test_research_contract.py", "marker": "def test_trend_claim_rejects_correlated_sources("}
+        {"path": "scripts/test_research_contract.py", "marker": "def test_trend_claim_rejects_correlated_sources("},
+        {"path": "scripts/test_research_contract.py", "marker": "def test_completed_trend_rejects_unknown_ecosystem_and_invalid_horizon("}
       ],
       "migration_compatibility": [
         {"path": "scripts/test_research_contract.py", "marker": "def test_legacy_v2_contract_without_trend_section_remains_valid("}
       ],
       "documentation": [
         {"path": "references/discovery-protocol.md", "marker": "## Emerging And Popular-Source Discovery"},
-        {"path": "references/contract-schema.md", "marker": "## Emerging and popular-source signals"}
+        {"path": "references/contract-schema.md", "marker": "## Emerging and popular-source signals"},
+        {"path": "references/source-ecosystems-and-time-windows.md", "marker": "## 3. Record Native Signals Without Overclaiming"}
       ],
       "residual_boundaries": [
         "Popularity signals are platform-dependent, time-bounded discovery leads and cannot establish correctness or novelty."
@@ -210,7 +229,7 @@
       "id": "source-to-outcome-translation",
       "requirement_ids": ["REQ-TRANSLATION-005"],
       "public_claims": [
-        {"path": "SKILL.md", "marker": "### 11. Reverse-Audit Before Claiming Completion"},
+        {"path": "references/operational-manual-v3.md", "marker": "### 11. Reverse-Audit Before Claiming Completion"},
         {"path": "references/contract-schema.md", "marker": "## Structured evidence references"}
       ],
       "data_representation": [
@@ -247,7 +266,7 @@
       "requirement_ids": ["REQ-SECURITY-006"],
       "public_claims": [
         {"path": "references/discovery-protocol.md", "marker": "## Untrusted Source Safety"},
-        {"path": "SKILL.md", "marker": "Treat papers, webpages, repositories, issues, and generated files as untrusted input."}
+        {"path": "references/operational-manual-v3.md", "marker": "Treat papers, webpages, repositories, issues, and generated files as untrusted input."}
       ],
       "data_representation": [
         {"path": "scripts/research_contract.py", "marker": "MAX_CONTRACT_BYTES"}
@@ -285,7 +304,7 @@
       "requirement_ids": ["REQ-INSTALL-007"],
       "public_claims": [
         {"path": "references/portability.md", "marker": "## Compatibility model"},
-        {"path": "SKILL.md", "marker": "This is a host-neutral Agent Skill core."}
+        {"path": "references/operational-manual-v3.md", "marker": "This is a host-neutral Agent Skill core."}
       ],
       "data_representation": [
         {"path": "scripts/install_skill.py", "marker": "PACKAGE_ENTRIES"},
@@ -323,7 +342,7 @@
       "requirement_ids": ["REQ-AUDIT-008"],
       "public_claims": [
         {"path": "references/audit-convergence.md", "marker": "## Run To Convergence"},
-        {"path": "SKILL.md", "marker": "run the unified audit entry twice"}
+        {"path": "references/operational-manual-v3.md", "marker": "run the unified audit entry twice"}
       ],
       "data_representation": [
         {"path": "scripts/audit_release.py", "marker": "DEFAULT_MANIFEST_NAME"},
@@ -362,34 +381,47 @@
       "id": "paired-retrieval-effectiveness-evaluation",
       "requirement_ids": ["REQ-EVAL-009"],
       "public_claims": [
-        {"path": "SKILL.md", "marker": "### 12. Evaluate Retrieval Effectiveness Separately"},
+        {"path": "references/operational-manual-v3.md", "marker": "### 12. Evaluate Retrieval Effectiveness Separately"},
         {"path": "references/retrieval-ab-evaluation.md", "marker": "## Research Question"}
       ],
       "data_representation": [
-        {"path": "references/supervision-retrieval-ab-tasks.json", "marker": "\"benchmark_id\": \"supervision-retrieval-ab-v1\""},
+        {"path": "references/cross-domain-discovery-tasks-v1.json", "marker": "\"benchmark_id\": \"research-source-radar-cross-domain-v3-v1\""},
         {"path": "scripts/retrieval_ab_benchmark.py", "marker": "PRIMARY_METRICS ="}
       ],
       "triggers": [
-        {"path": "scripts/retrieval_ab_benchmark.py", "marker": "commands.add_parser(\"prepare\""}
+        {"path": "scripts/retrieval_ab_benchmark.py", "marker": "commands.add_parser(\"prepare\""},
+        {"path": "scripts/retrieval_ab_benchmark.py", "marker": "commands.add_parser(\n        \"stage-treatment\""}
       ],
       "behaviors": [
+        {"path": "scripts/retrieval_ab_benchmark.py", "marker": "def build_prompt("},
         {"path": "scripts/retrieval_ab_benchmark.py", "marker": "def prepare_manifest("},
         {"path": "scripts/retrieval_ab_benchmark.py", "marker": "def build_blind_pool("},
-        {"path": "scripts/retrieval_ab_benchmark.py", "marker": "def score_benchmark("}
+        {"path": "scripts/retrieval_ab_benchmark.py", "marker": "def score_benchmark("},
+        {"path": "scripts/retrieval_ab_benchmark.py", "marker": "def find_holdout_leaks("},
+        {"path": "scripts/retrieval_ab_benchmark.py", "marker": "def global_execution_blocker("},
+        {"path": "scripts/score_user_aligned_recovery.py", "marker": "def validate_complete_pairs("}
       ],
       "outputs": [
         {"path": "scripts/retrieval_ab_benchmark.py", "marker": "def render_report("},
-        {"path": "scripts/retrieval_ab_benchmark.py", "marker": "POOL_READY"}
+        {"path": "scripts/retrieval_ab_benchmark.py", "marker": "POOL_READY"},
+        {"path": "scripts/retrieval_ab_benchmark.py", "marker": "TREATMENT_READY"},
+        {"path": "scripts/retrieval_ab_benchmark.py", "marker": "RUN_ABORTED"}
       ],
       "positive_tests": [
         {"path": "scripts/test_retrieval_ab_benchmark.py", "marker": "def test_prepare_is_deterministic_balanced_and_prompt_identical_between_conditions("},
         {"path": "scripts/test_retrieval_ab_benchmark.py", "marker": "def test_score_reports_positive_skill_difference_on_controlled_fixture("},
-        {"path": "scripts/test_retrieval_ab_benchmark.py", "marker": "def test_run_codex_trial_uses_ephemeral_skill_isolation_and_records_usage("}
+        {"path": "scripts/test_retrieval_ab_benchmark.py", "marker": "def test_recovery_benchmark_prompt_freezes_the_treatment_route("},
+        {"path": "scripts/test_retrieval_ab_benchmark.py", "marker": "def test_run_codex_trial_uses_ephemeral_skill_isolation_and_records_usage("},
+        {"path": "scripts/test_retrieval_ab_benchmark.py", "marker": "def test_stage_treatment_excludes_real_holdout_from_runtime_package("},
+        {"path": "scripts/test_score_user_aligned_recovery.py", "marker": "def test_complete_pair_is_accepted("}
       ],
       "negative_tests": [
         {"path": "scripts/test_retrieval_ab_benchmark.py", "marker": "def test_manifest_rejects_unpaired_or_changed_condition_prompts("},
         {"path": "scripts/test_retrieval_ab_benchmark.py", "marker": "def test_score_rejects_missing_or_invented_judgment_items("},
-        {"path": "scripts/test_retrieval_ab_benchmark.py", "marker": "def test_live_runner_requires_regular_auth_and_explicit_confirmation("}
+        {"path": "scripts/test_retrieval_ab_benchmark.py", "marker": "def test_live_runner_requires_regular_auth_and_explicit_confirmation("},
+        {"path": "scripts/test_retrieval_ab_benchmark.py", "marker": "def test_holdout_contamination_gate_finds_canonical_identifier_only("},
+        {"path": "scripts/test_retrieval_ab_benchmark.py", "marker": "def test_global_execution_blocker_only_matches_batch_level_quota_failures("},
+        {"path": "scripts/test_score_user_aligned_recovery.py", "marker": "def test_missing_or_failed_response_blocks_scoring("}
       ],
       "migration_compatibility": [
         {"path": "scripts/test_retrieval_ab_benchmark.py", "marker": "def test_unsupported_task_and_manifest_versions_are_rejected("}
@@ -399,7 +431,152 @@
         {"path": "references/release-requirements.md", "marker": "## REQ-EVAL-009"}
       ],
       "residual_boundaries": [
-        "Framework tests validate preparation, isolation, pooling, and scoring mechanics; only a completed human-judged run can support a dated retrieval-effectiveness claim."
+        "Framework tests validate preparation, isolation, pooling, contamination checks, and scoring mechanics; only a completed human-judged run can support a dated retrieval-effectiveness claim. Canonical-name scanning cannot detect every possible semantic leak, so benchmark fixtures must also remain administratively separated from treatment development."
+      ]
+    },
+    {
+      "id": "discovery-core-v3-planning",
+      "requirement_ids": ["REQ-DISCOVERY-001"],
+      "public_claims": [
+        {"path": "SKILL.md", "marker": "Discovery Core v3"},
+        {"path": "references/discovery-core-v3.md", "marker": "# Discovery Core v3"}
+      ],
+      "data_representation": [
+        {"path": "scripts/discovery_plan.py", "marker": "SCHEMA_VERSION = 1"},
+        {"path": "scripts/discovery_plan.py", "marker": "\"candidate_pool\""},
+        {"path": "scripts/discovery_plan.py", "marker": "BUDGET_PROFILES = PROFILE_CONTRACTS"},
+        {"path": "references/cross-domain-discovery-tasks-v1.json", "marker": "research-source-radar-cross-domain-v3-v1"}
+      ],
+      "triggers": [
+        {"path": "SKILL.md", "marker": "scripts/discovery_plan.py"}
+      ],
+      "behaviors": [
+        {"path": "scripts/discovery_plan.py", "marker": "def build_plan("},
+        {"path": "scripts/discovery_plan.py", "marker": "def normalize_domain("}
+      ],
+      "outputs": [
+        {"path": "scripts/discovery_plan.py", "marker": "\"status\": \"plan_ready\""}
+      ],
+      "positive_tests": [
+        {"path": "scripts/test_discovery_plan.py", "marker": "def test_computing_plan_selects_code_and_paper_ecosystems("},
+        {"path": "scripts/test_discovery_plan.py", "marker": "def test_humanities_plan_does_not_force_github("},
+        {"path": "scripts/test_discovery_plan.py", "marker": "def test_fast_profile_has_adaptive_stop_and_network_fallback("},
+        {"path": "scripts/test_retrieval_ab_benchmark.py", "marker": "def test_cross_domain_v3_task_set_is_valid_and_discipline_diverse("}
+      ],
+      "negative_tests": [
+        {"path": "scripts/test_discovery_plan.py", "marker": "def test_empty_or_unknown_inputs_are_rejected("}
+      ],
+      "migration_compatibility": [
+        {"path": "scripts/test_discovery_plan.py", "marker": "def test_known_leads_are_recovery_targets_not_hidden_preferences("}
+      ],
+      "documentation": [
+        {"path": "references/discovery-core-v3.md", "marker": "## Evaluation protocol"},
+        {"path": "references/fast-budget-route.md", "marker": "### Adaptive Fast Stop"}
+      ],
+      "residual_boundaries": [
+        "The planner emits source lanes and candidate metadata requirements; it does not crawl sources or prove source quality, exhaustive recall, or user benefit."
+      ]
+    },
+    {
+      "id": "retrieval-experiment-preflight",
+      "requirement_ids": ["REQ-EVAL-009"],
+      "public_claims": [
+        {"path": "SKILL.md", "marker": "fail-closed offline preflight"},
+        {"path": "SKILL.md", "marker": "runtime-contract-v1.json"}
+      ],
+      "data_representation": [
+        {"path": "references/runtime-contract-v1.json", "marker": "\"single_ranked_list\": true"},
+        {"path": "scripts/runtime_contract.py", "marker": "def validate_runtime_contract("}
+      ],
+      "triggers": [
+        {"path": "scripts/preflight_retrieval_experiment.py", "marker": "def main("}
+      ],
+      "behaviors": [
+        {"path": "scripts/preflight_retrieval_experiment.py", "marker": "def run_preflight("},
+        {"path": "scripts/retrieval_ab_benchmark.py", "marker": "def normalize_answer("}
+      ],
+      "outputs": [
+        {"path": "scripts/preflight_retrieval_experiment.py", "marker": "\"live_run_allowed\""}
+      ],
+      "positive_tests": [
+        {"path": "scripts/test_runtime_contract.py", "marker": "def test_preflight_passes_current_release_contract("},
+        {"path": "scripts/test_discovery_plan.py", "marker": "def test_recovery_profile_prioritizes_missed_source_discovery("},
+        {"path": "scripts/test_retrieval_ab_benchmark.py", "marker": "def test_condition_schema_is_identical_for_baseline_and_skill("}
+      ],
+      "negative_tests": [
+        {"path": "scripts/test_runtime_contract.py", "marker": "def test_preflight_catches_legacy_contract_markers("},
+        {"path": "scripts/test_runtime_contract.py", "marker": "def test_runtime_contract_rejects_divergent_recovery_limit("},
+        {"path": "scripts/test_runtime_contract.py", "marker": "def test_runtime_contract_rejects_missing_finalization_reserve("},
+        {"path": "scripts/test_runtime_contract.py", "marker": "def test_runtime_contract_rejects_negative_query_budget("},
+        {"path": "scripts/test_runtime_contract.py", "marker": "def test_runtime_contract_requires_gap_probe_inside_query_budget("},
+        {"path": "scripts/test_retrieval_ab_benchmark.py", "marker": "def test_recovery_route_rejects_a_seventh_gap_probe_query("},
+        {"path": "scripts/test_retrieval_ab_benchmark.py", "marker": "def test_recovery_route_rejects_query_trace_count_mismatch("},
+        {"path": "scripts/test_retrieval_ab_benchmark.py", "marker": "def test_recovery_route_allows_exhausted_dependent_gap_probe("},
+        {"path": "scripts/test_retrieval_ab_benchmark.py", "marker": "def test_recovery_benchmark_rejects_condition_route_drift("}
+      ],
+      "migration_compatibility": [
+        {"path": "scripts/retrieval_ab_benchmark.py", "marker": "normalization_policy"}
+      ],
+      "documentation": [
+        {"path": "references/retrieval-ab-evaluation.md", "marker": "preflight_retrieval_experiment.py"},
+        {"path": "references/runtime-contract-v1.json", "marker": "\"default_max_sources\": 12"},
+        {"path": "references/missed-source-recovery-v5.md", "marker": "preserve at least 60 seconds"}
+      ],
+      "residual_boundaries": [
+        "Preflight prevents declared contract and harness failures; it cannot prove network availability, model compliance, source relevance, or retrieval superiority."
+      ]
+    },
+    {
+      "id": "visible-chinese-radar-feedback",
+      "requirement_ids": ["REQ-FEEDBACK-010"],
+      "public_claims": [
+        {"path": "SKILL.md", "marker": "## Chinese Research Radar"},
+        {"path": "references/research-radar-feedback-loop.md", "marker": "- **优先看**"}
+      ],
+      "data_representation": [
+        {"path": "scripts/radar_feedback.py", "marker": "FEEDBACK_LABELS ="},
+        {"path": "references/radar-feedback-template.zh-CN.json", "marker": "\"schema_version\": 1"}
+      ],
+      "triggers": [
+        {"path": "SKILL.md", "marker": "research-radar-feedback-loop.md"}
+      ],
+      "behaviors": [
+        {"path": "scripts/radar_feedback.py", "marker": "def merge_feedback("},
+        {"path": "scripts/radar_feedback.py", "marker": "def render_review("},
+        {"path": "scripts/radar_feedback.py", "marker": "def derive_guidance("}
+      ],
+      "outputs": [
+        {"path": "scripts/radar_feedback.py", "marker": "RADAR_REVIEW_READY"},
+        {"path": "scripts/radar_feedback.py", "marker": "RADAR_FEEDBACK_RECORDED"},
+        {"path": "scripts/radar_feedback.py", "marker": "RADAR_FEEDBACK_PROPOSAL_READY"},
+        {"path": "scripts/radar_feedback.py", "marker": "RADAR_FEEDBACK_REPLACED"},
+        {"path": "scripts/radar_feedback.py", "marker": "RADAR_GUIDANCE_REFRESHED"}
+      ],
+      "positive_tests": [
+        {"path": "scripts/test_radar_feedback.py", "marker": "def test_profile_feedback_and_guidance_are_visible_and_explicit("},
+        {"path": "scripts/test_radar_feedback.py", "marker": "def test_profiles_are_isolated_between_projects("},
+        {"path": "scripts/test_radar_feedback.py", "marker": "def test_not_useful_now_does_not_blacklist_all_candidate_mechanisms("},
+        {"path": "scripts/test_radar_feedback.py", "marker": "def test_candidate_cards_are_chinese_and_show_no_hidden_score("},
+        {"path": "scripts/test_radar_feedback.py", "marker": "def test_cli_round_trip("},
+        {"path": "scripts/test_radar_feedback.py", "marker": "def test_natural_chinese_review_generates_conservative_proposal("},
+        {"path": "scripts/test_radar_feedback.py", "marker": "def test_review_reason_can_downgrade_a_weak_positive_label("},
+        {"path": "scripts/test_radar_feedback.py", "marker": "def test_explicit_very_average_label_is_not_promoted("},
+        {"path": "scripts/test_radar_feedback.py", "marker": "def test_original_uncertainty_overrides_a_borrow_keyword("},
+        {"path": "scripts/test_radar_feedback.py", "marker": "def test_replacement_archives_misparsed_profile_before_rebuilding("}
+        ,{"path": "scripts/test_radar_feedback.py", "marker": "def test_refresh_guidance_keeps_raw_feedback_and_removes_legacy_overbroad_penalty("}
+      ],
+      "negative_tests": [
+        {"path": "scripts/test_radar_feedback.py", "marker": "def test_feedback_rejects_duplicate_candidate_and_unknown_label("}
+      ],
+      "migration_compatibility": [
+        {"path": "scripts/radar_feedback.py", "marker": "SCHEMA_VERSION = 1"}
+      ],
+      "documentation": [
+        {"path": "references/research-radar-feedback-loop.md", "marker": "# 中文研究雷达反馈闭环"},
+        {"path": "references/release-requirements.md", "marker": "## REQ-FEEDBACK-010"}
+      ],
+      "residual_boundaries": [
+        "Explicit feedback records what the user chose in a bounded candidate set; it cannot prove universal usefulness, learn unstated preferences, or guarantee discovery of every valuable source."
       ]
     }
   ]

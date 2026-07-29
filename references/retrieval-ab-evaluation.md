@@ -14,7 +14,7 @@
 
 ## Research Question
 
-Under a fixed model, web-tool set, cutoff date, and execution budget, does loading `research-discovery-and-translation-audit` improve the relevance, source validity, SuperVision constraint fit, and efficiency of research/open-source discovery compared with the same agent without the Skill?
+Under a fixed model, web-tool set, cutoff date, and execution budget, does loading `research-discovery-and-translation-audit` improve relevance, source validity, target-project constraint fit, and efficiency of research/open-source discovery compared with the same agent without the Skill?
 
 The independent variable is target-Skill presence. The primary outcomes are `nDCG@10` and the number of valid, highly relevant sources. Invalid-source rate and completion are safety outcomes. Time and token-normalized useful-source yield are efficiency outcomes.
 
@@ -29,7 +29,7 @@ Following the distinction used by ResearchArena, do not treat one aggregate rele
 
 Known-lead recovery is a useful safety check but is not novel discovery. If a task contains named leads, record them separately from the pooled novel-candidate analysis. Preserve unresolved leads and hard negatives instead of replacing them with popular generic sources.
 
-The current `supervision-retrieval-ab-v1` runner keeps its frozen schema and primary metrics unchanged. A future benchmark revision may add declared aspect labels such as mechanism, implementation, evaluation, failure, and recent work, then report aspect coverage and duplicate rate. Do not retrofit those labels into an already scored run; create a new benchmark ID and rerun both conditions. ResearchArena is an evaluation precedent, not evidence that this Skill generalizes across models or disciplines.
+The current public runner keeps its frozen schema and primary metrics unchanged. A future benchmark revision may add declared aspect labels such as mechanism, implementation, evaluation, failure, and recent work, then report aspect coverage and duplicate rate. Do not retrofit those labels into an already scored run; create a new benchmark ID and rerun both conditions. ResearchArena is an evaluation precedent, not evidence that this Skill generalizes across models or disciplines.
 
 ## Conditions And Isolation
 
@@ -45,18 +45,17 @@ The prompt says only to use any installed Skill that applies. It does not summar
 
 ## Frozen Task Sets
 
-The versioned task set is [supervision-retrieval-ab-tasks.json](supervision-retrieval-ab-tasks.json).
+The evaluator must supply a versioned task set from outside this Skill package. Keep the task file, hidden gold labels, and scored outputs outside the public runtime package.
 
-- Pilot: 8 tasks x 2 conditions x 2 repetitions = 32 trials.
-- Main: 30 tasks x 2 conditions x 3 repetitions = 180 trials.
-- Categories: exact identity, ambiguous user-shared seed, similar-work expansion, current landscape, and mechanism transfer.
-- All tasks use the same frozen cutoff date and SuperVision constraints: non-jailbroken standalone iPhone, no runtime computer or remote browser, VoiceOver compatibility, bounded memory, and auditable behavior.
+- Pilot and main trial counts are defined by the external task file.
+- Categories should cover exact identity, ambiguous user-shared seeds, similar-work expansion, current landscape, and mechanism transfer when relevant.
+- Task-specific constraints, dates, and evaluation criteria must remain visible in the external task file.
 
 Do not change task wording, source limits, model, reasoning effort, timeout, or scoring rules after viewing condition results. A material change creates a new benchmark version.
 
 ## Discovery Core v3 Cross-domain Extension
 
-The v3 extension is frozen separately in [cross-domain-discovery-tasks-v1.json](cross-domain-discovery-tasks-v1.json). It targets the missed-source problem across disciplines rather than only seed-to-neighbor tasks in computing. The pilot uses four prompts (health, social science, business, and humanities), two conditions, and two repetitions: 16 trials total. The main set contains eight prompts and adds arts/design/media, experimental science, education, and interdisciplinary public health. Keep v3 manifests, pooled judgments, and scores separate from the legacy `supervision-retrieval-ab-tasks.json` benchmark; their trial counts and task distributions are not interchangeable.
+The public v3 extension is included separately in [cross-domain-discovery-tasks-v1.json](cross-domain-discovery-tasks-v1.json). It targets the missed-source problem across disciplines. Keep its manifests, pooled judgments, and scores separate from any private or project-specific task set; trial counts and task distributions are not interchangeable.
 
 The v3 pilot's execution result is not a retrieval-quality result until its condition-blind pool has been judged. A completed run establishes only completion, runtime, and source-pool construction. Relevance, identity validity, constraint fit, and discovery recall require the same external judgment and scoring procedure described below.
 
@@ -150,7 +149,7 @@ From the installed Skill root:
 
 ```bash
 python3 scripts/retrieval_ab_benchmark.py validate-tasks \
-  --tasks references/supervision-retrieval-ab-tasks.json
+  --tasks /path/to/frozen-task-set.json
 ```
 
 Run the fail-closed contract check before preparing or executing live trials:
@@ -158,7 +157,7 @@ Run the fail-closed contract check before preparing or executing live trials:
 ```bash
 python3 scripts/preflight_retrieval_experiment.py \
   --skill-root "$HOME/.codex/skills/research-discovery-and-translation-audit" \
-  --tasks references/supervision-retrieval-ab-tasks.json
+  --tasks /path/to/frozen-task-set.json
 ```
 
 The preflight blocks live execution when the baseline and Skill schemas differ, source caps conflict, normalization differs, legacy output rules remain, or the runner and installed target Skill are different versions. A passing run emits a contract fingerprint. The live runner also writes that result to `preflight_report.json` beside the trial manifest.
@@ -167,7 +166,7 @@ Prepare a pilot outside the Skill package:
 
 ```bash
 python3 scripts/retrieval_ab_benchmark.py prepare \
-  --tasks references/supervision-retrieval-ab-tasks.json \
+  --tasks /path/to/frozen-task-set.json \
   --phase pilot \
   --runs 2 \
   --seed 20260716 \
@@ -175,7 +174,7 @@ python3 scripts/retrieval_ab_benchmark.py prepare \
   --reasoning-effort high \
   --max-wall-seconds 600 \
   --max-sources 6 \
-  --output-dir /path/to/supervision-retrieval-ab-pilot
+  --output-dir /path/to/retrieval-ab-pilot
 ```
 
 Execute pending trials only after reviewing the manifest. The explicit confirmation flag prevents accidental model/network spending:
@@ -187,7 +186,7 @@ python3 scripts/retrieval_ab_benchmark.py stage-treatment \
   --holdout-gold /path/outside/the/treatment/hidden-gold.json
 
 python3 scripts/retrieval_ab_benchmark.py run \
-  --run-dir /path/to/supervision-retrieval-ab-pilot \
+  --run-dir /path/to/retrieval-ab-pilot \
   --codex /path/to/codex \
   --source-codex-home "$HOME/.codex" \
   --target-skill /path/to/holdout-clean-treatment \
@@ -222,19 +221,19 @@ Create the blind pool:
 
 ```bash
 python3 scripts/retrieval_ab_benchmark.py pool \
-  --run-dir /path/to/supervision-retrieval-ab-pilot \
-  --tasks references/supervision-retrieval-ab-tasks.json \
-  --output /path/to/supervision-retrieval-ab-pilot/blind_judgments.json
+  --run-dir /path/to/retrieval-ab-pilot \
+  --tasks /path/to/frozen-task-set.json \
+  --output /path/to/retrieval-ab-pilot/blind_judgments.json
 ```
 
 After every row has been judged:
 
 ```bash
 python3 scripts/retrieval_ab_benchmark.py score \
-  --run-dir /path/to/supervision-retrieval-ab-pilot \
-  --judgments /path/to/supervision-retrieval-ab-pilot/blind_judgments.json \
-  --output /path/to/supervision-retrieval-ab-pilot/metrics.json \
-  --report /path/to/supervision-retrieval-ab-pilot/report.md
+  --run-dir /path/to/retrieval-ab-pilot \
+  --judgments /path/to/retrieval-ab-pilot/blind_judgments.json \
+  --output /path/to/retrieval-ab-pilot/metrics.json \
+  --report /path/to/retrieval-ab-pilot/report.md
 ```
 
 ## Interpretation Boundary
