@@ -468,6 +468,14 @@ def sha256_file(path: Path) -> str:
 
 
 def file_state(info: os.stat_result) -> FileState:
+    if os.name == "nt":
+        return (
+            0,
+            0,
+            info.st_size,
+            getattr(info, "st_mtime_ns", int(info.st_mtime * 1_000_000_000)),
+            0,
+        )
     return (
         info.st_dev,
         info.st_ino,

@@ -55,7 +55,7 @@ Do not change task wording, source limits, model, reasoning effort, timeout, or 
 
 ## Discovery Core v3 Cross-domain Extension
 
-The public v3 extension is included separately in [cross-domain-discovery-tasks-v1.json](cross-domain-discovery-tasks-v1.json). It targets the missed-source problem across disciplines. Keep its manifests, pooled judgments, and scores separate from any private or project-specific task set; trial counts and task distributions are not interchangeable.
+The v3 extension targets the missed-source problem across disciplines. Provide its task file, manifests, pooled judgments, and scores outside the public Skill package, and keep them separate from any private or project-specific task set.
 
 The v3 pilot's execution result is not a retrieval-quality result until its condition-blind pool has been judged. A completed run establishes only completion, runtime, and source-pool construction. Relevance, identity validity, constraint fit, and discovery recall require the same external judgment and scoring procedure described below.
 

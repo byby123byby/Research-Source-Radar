@@ -1851,8 +1851,17 @@ def _text_output(value: Any) -> str:
 
 def _terminate_process_group(process: subprocess.Popen[str]) -> None:  # nosec B603
     """Reap Codex and descendants so a timed-out web search cannot block the runner."""
+    killpg = getattr(os, "killpg", None)
+    if killpg is None:
+        try:
+            process.terminate()
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5)
+        return
     try:
-        os.killpg(process.pid, signal.SIGTERM)
+        killpg(process.pid, signal.SIGTERM)
     except ProcessLookupError:
         # The direct child may have exited while a descendant still owns the
         # pipes. There is no process group left only when cleanup is complete.
@@ -1861,7 +1870,7 @@ def _terminate_process_group(process: subprocess.Popen[str]) -> None:  # nosec B
         process.wait(timeout=5)
     except subprocess.TimeoutExpired:
         try:
-            os.killpg(process.pid, signal.SIGKILL)
+            killpg(process.pid, signal.SIGKILL)
         except ProcessLookupError:
             return
         process.wait(timeout=5)

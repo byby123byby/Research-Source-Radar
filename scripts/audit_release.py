@@ -81,6 +81,21 @@ def path_is_excluded(relative: Path, manifest_relative: Path | None) -> bool:
     return relative.name in CACHE_NAMES or relative.suffix == ".pyc"
 
 
+def stable_file_state(info: os.stat_result) -> tuple[int, ...]:
+    if os.name == "nt":
+        return (
+            info.st_size,
+            getattr(info, "st_mtime_ns", int(info.st_mtime * 1_000_000_000)),
+        )
+    return (
+        info.st_dev,
+        info.st_ino,
+        info.st_size,
+        info.st_mtime_ns,
+        info.st_ctime_ns,
+    )
+
+
 def read_regular_bytes(path: Path) -> bytes:
     flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
     descriptor = os.open(path, flags)
@@ -100,8 +115,8 @@ def read_regular_bytes(path: Path) -> bytes:
             remaining -= len(chunk)
         payload = b"".join(chunks)
         after = os.fstat(descriptor)
-        before_state = (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns, before.st_ctime_ns)
-        after_state = (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns)
+        before_state = stable_file_state(before)
+        after_state = stable_file_state(after)
         if before_state != after_state or len(payload) != before.st_size:
             raise RuntimeError(f"audit file changed while being read: {path}")
         return payload
@@ -336,8 +351,8 @@ def hash_regular_file(path: Path, *, max_bytes: int) -> str:
                 raise ValueError(f"tool executable exceeds {max_bytes} bytes: {path}")
             digest.update(chunk)
         after = os.fstat(descriptor)
-        before_state = (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns, before.st_ctime_ns)
-        after_state = (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns)
+        before_state = stable_file_state(before)
+        after_state = stable_file_state(after)
         if before_state != after_state or total != before.st_size:
             raise RuntimeError(f"tool executable changed while being hashed: {path}")
         return digest.hexdigest()

@@ -126,7 +126,7 @@ Run the deterministic planner when useful:
 python3 scripts/discovery_plan.py --help
 ```
 
-Do not claim that v3 was executed unless the final trace records the plan, lanes, queries, stop evidence, and uncovered ecosystems. Use `cross-domain-discovery-tasks-v1.json` for the frozen cross-domain evaluation; it is a task set, not a gold answer list.
+Do not claim that v3 was executed unless the final trace records the plan, lanes, queries, stop evidence, and uncovered ecosystems. For a frozen cross-domain evaluation, provide the task set outside the public Skill package; it is a task set, not a gold answer list.
 
 ## Chinese Research Radar
 

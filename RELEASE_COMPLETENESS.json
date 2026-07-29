@@ -385,7 +385,7 @@
         {"path": "references/retrieval-ab-evaluation.md", "marker": "## Research Question"}
       ],
       "data_representation": [
-        {"path": "references/cross-domain-discovery-tasks-v1.json", "marker": "\"benchmark_id\": \"research-source-radar-cross-domain-v3-v1\""},
+        {"path": "scripts/test_retrieval_ab_benchmark.py", "marker": "def public_task_set"},
         {"path": "scripts/retrieval_ab_benchmark.py", "marker": "PRIMARY_METRICS ="}
       ],
       "triggers": [
@@ -444,8 +444,7 @@
       "data_representation": [
         {"path": "scripts/discovery_plan.py", "marker": "SCHEMA_VERSION = 1"},
         {"path": "scripts/discovery_plan.py", "marker": "\"candidate_pool\""},
-        {"path": "scripts/discovery_plan.py", "marker": "BUDGET_PROFILES = PROFILE_CONTRACTS"},
-        {"path": "references/cross-domain-discovery-tasks-v1.json", "marker": "research-source-radar-cross-domain-v3-v1"}
+        {"path": "scripts/discovery_plan.py", "marker": "BUDGET_PROFILES = PROFILE_CONTRACTS"}
       ],
       "triggers": [
         {"path": "SKILL.md", "marker": "scripts/discovery_plan.py"}

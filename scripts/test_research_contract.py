@@ -477,10 +477,12 @@ class ResearchContractTests(unittest.TestCase):
             root = Path(directory)
             contract = root / "contract.json"
             rc.write_json_atomic(contract, {"value": 1})
-            self.assertEqual(0o600, stat.S_IMODE(contract.stat().st_mode))
+            if os.name != "nt":
+                self.assertEqual(0o600, stat.S_IMODE(contract.stat().st_mode))
             contract.chmod(0o640)
             rc.write_json_atomic(contract, {"value": 2})
-            self.assertEqual(0o640, stat.S_IMODE(contract.stat().st_mode))
+            if os.name != "nt":
+                self.assertEqual(0o640, stat.S_IMODE(contract.stat().st_mode))
 
             report = root / "report.md"
             rc.write_text_atomic(report, "report\n", default_mode=0o644)

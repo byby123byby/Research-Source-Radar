@@ -138,12 +138,11 @@ the runtime prompt. Report:
 - identity-validity and completion;
 - recovery per minute and per 10,000 tokens.
 
-For a discipline-diverse smoke test, use
-`cross-domain-discovery-tasks-v1.json`. It contains eight frozen prompts across
-health, social science, business, humanities, arts/design/media, experimental
-science, education, and interdisciplinary public-health work. It is a task set,
-not a gold answer list: blind human review is still required for user-approved
-novelty, mechanism-family coverage, and hard-negative quality.
+For a discipline-diverse smoke test, provide a frozen task file outside the
+public Skill package. It should cover several fields and contain prompts,
+constraints, source types, and evaluation focus. It is a task set, not a gold
+answer list: blind human review is still required for user-approved novelty,
+mechanism-family coverage, and hard-negative quality.
 
 A v3 route may become the default only after repeated paired trials show better
 known-lead or user-approved-novel recovery, no material primary-quality loss, and a

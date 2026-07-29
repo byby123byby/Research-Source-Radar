@@ -18,9 +18,7 @@ SKILL_NAME = "research-discovery-and-translation-audit"
 PACKAGE_FILE_ENTRIES = ("LICENSE", "SKILL.md", "RELEASE_COMPLETENESS.json")
 PACKAGE_DIRECTORY_ENTRIES = ("agents", "references", "scripts")
 PACKAGE_ENTRIES = (*PACKAGE_FILE_ENTRIES, *PACKAGE_DIRECTORY_ENTRIES)
-BENCHMARK_TREATMENT_EXCLUDED_FILES = {
-    "cross-domain-discovery-tasks-v1.json",
-}
+BENCHMARK_TREATMENT_EXCLUDED_FILES: set[str] = set()
 USER_TARGETS = {
     "codex-user": Path.home() / ".codex" / "skills" / SKILL_NAME,
     "claude-user": Path.home() / ".claude" / "skills" / SKILL_NAME,

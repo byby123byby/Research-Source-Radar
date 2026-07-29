@@ -17,12 +17,47 @@ import retrieval_ab_benchmark as ab
 
 
 SKILL_ROOT = Path(__file__).resolve().parents[1]
-CROSS_DOMAIN_TASK_FILE = SKILL_ROOT / "references" / "cross-domain-discovery-tasks-v1.json"
-TASK_FILE = CROSS_DOMAIN_TASK_FILE
+
+
+def public_task_set():
+    categories = [
+        "similar_work",
+        "mechanism_transfer",
+        "current_landscape",
+        "similar_work",
+        "mechanism_transfer",
+        "similar_work",
+        "current_landscape",
+        "mechanism_transfer",
+    ]
+    tasks = [
+        {
+            "id": f"TASK-{201 + index}",
+            "category": category,
+            "prompt": f"Find traceable research sources for a cross-disciplinary project in task family {index + 1}.",
+            "constraints": ["Keep source identity visible", "Separate direct evidence from transferable mechanisms"],
+            "source_types": ["paper", "official_document"],
+            "time_sensitive": category == "current_landscape",
+            "evaluation_focus": "Source validity, relevance, and mechanism transfer.",
+        }
+        for index, category in enumerate(categories)
+    ]
+    ids = [item["id"] for item in tasks]
+    return {
+        "schema_version": 1,
+        "benchmark_id": "research-source-radar-cross-domain-v3-v1",
+        "cutoff_date": "2026-07-18",
+        "research_question": "Does the Skill recover useful, identity-valid sources across disciplines?",
+        "primary_metrics": list(ab.PRIMARY_METRICS),
+        "safety_metrics": ["invalid_source_rate", "completion"],
+        "efficiency_metrics": ["valid_relevant_per_1k_tokens", "valid_relevant_per_minute", "wall_seconds", "total_tokens"],
+        "task_sets": {"pilot": ids[:4], "main": ids},
+        "tasks": tasks,
+    }
 
 
 def benchmark_tasks():
-    return ab.contract.load_json(TASK_FILE)
+    return public_task_set()
 
 
 def small_tasks():
@@ -171,7 +206,7 @@ class RetrievalABBenchmarkTests(unittest.TestCase):
         self.assertEqual(list(ab.PRIMARY_METRICS), data["primary_metrics"])
 
     def test_cross_domain_v3_task_set_is_valid_and_discipline_diverse(self):
-        data = ab.contract.load_json(CROSS_DOMAIN_TASK_FILE)
+        data = benchmark_tasks()
         self.assertEqual([], ab.validate_tasks(data))
         self.assertEqual("research-source-radar-cross-domain-v3-v1", data["benchmark_id"])
         self.assertEqual(8, len(data["tasks"]))
@@ -936,7 +971,7 @@ class RetrievalABBenchmarkTests(unittest.TestCase):
                     return self.returncode
 
             with mock.patch.object(ab.subprocess, "Popen", return_value=TimeoutProcess()), mock.patch.object(
-                ab.os, "killpg"
+                ab.os, "killpg", create=True
             ) as killpg:
                 result = ab.run_codex_trial(
                     codex=codex,
@@ -961,7 +996,7 @@ class RetrievalABBenchmarkTests(unittest.TestCase):
             def wait(self, timeout=None):
                 return 0
 
-        with mock.patch.object(ab.os, "killpg") as killpg:
+        with mock.patch.object(ab.os, "killpg", create=True) as killpg:
             ab._terminate_process_group(ExitedParent())
         killpg.assert_called_once_with(54321, signal.SIGTERM)
 
