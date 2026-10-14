@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -45,7 +46,8 @@ class RadarFeedbackTests(unittest.TestCase):
 
     def cli(self, *args):
         return subprocess.run([sys.executable, str(Path(radar.__file__).resolve()), *args],
-                              capture_output=True, text=True, check=False)
+                              capture_output=True, encoding="utf-8", check=False,
+                              env={**os.environ, "PYTHONIOENCODING": "cp1252", "PYTHONUTF8": "0"})
 
     def profile(self):
         return radar.make_profile(
@@ -234,43 +236,35 @@ class RadarFeedbackTests(unittest.TestCase):
 
     def test_cli_round_trip(self):
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(directory) / "中文目录"
+            root.mkdir()
             profile_path = root / "profile.json"
             candidates_path = root / "candidates.json"
             review_path = root / "review.md"
             candidates_path.write_text(json.dumps(self.candidates(), ensure_ascii=False), encoding="utf-8")
-            script = Path(radar.__file__).resolve()
-            init = subprocess.run(
-                [sys.executable, str(script), "init", "--output", str(profile_path), "--project-id", "test-project", "--project-name", "ExampleProject", "--description", "中文研究雷达"],
-                capture_output=True,
-                text=True,
-                check=False,
+            init = self.cli(
+                "init", "--output", str(profile_path), "--project-id", "test-project",
+                "--project-name", "ExampleProject", "--description", "中文研究雷达",
             )
             self.assertEqual(0, init.returncode, init.stderr)
-            review = subprocess.run(
-                [sys.executable, str(script), "render-review", "--profile", str(profile_path), "--candidates", str(candidates_path), "--output", str(review_path)],
-                capture_output=True,
-                text=True,
-                check=False,
+            self.assertIn(str(profile_path), init.stdout)
+            review = self.cli(
+                "render-review", "--profile", str(profile_path), "--candidates", str(candidates_path),
+                "--output", str(review_path),
             )
             self.assertEqual(0, review.returncode, review.stderr)
             review_text = review_path.read_text(encoding="utf-8").replace("你的标注：`待填写`", "你的标注：可借鉴机制").replace("你的理由：`待填写`", "你的理由：可审计机制能迁移")
             review_text = review_text.replace("你的偏好范围：`待填写`", "你的偏好范围：维度").replace("你的确认维度：`待填写`", "你的确认维度：可审计")
             review_path.write_text(review_text, encoding="utf-8")
             proposal_path = root / "proposal.json"
-            proposal = subprocess.run(
-                [sys.executable, str(script), "extract-review", "--review", str(review_path), "--candidates", str(candidates_path), "--project-id", "test-project", "--output", str(proposal_path)],
-                capture_output=True,
-                text=True,
-                check=False,
+            proposal = self.cli(
+                "extract-review", "--review", str(review_path), "--candidates", str(candidates_path),
+                "--project-id", "test-project", "--output", str(proposal_path),
             )
             self.assertEqual(0, proposal.returncode, proposal.stderr)
             self.assertEqual(2, len(json.loads(proposal_path.read_text(encoding="utf-8"))["feedback"]))
-            recorded = subprocess.run(
-                [sys.executable, str(script), "record-feedback", "--profile", str(profile_path), "--feedback", str(proposal_path), "--confirm"],
-                capture_output=True,
-                text=True,
-                check=False,
+            recorded = self.cli(
+                "record-feedback", "--profile", str(profile_path), "--feedback", str(proposal_path), "--confirm",
             )
             self.assertEqual(0, recorded.returncode, recorded.stderr)
             self.assertIn("优先看", review_path.read_text(encoding="utf-8"))
@@ -281,6 +275,13 @@ class RadarFeedbackTests(unittest.TestCase):
             shown = self.cli("show-guidance", "--profile", str(profile_path))
             self.assertEqual(0, shown.returncode, shown.stdout + shown.stderr)
             self.assertIn("已确认偏好：可审计", shown.stdout)
+
+    def test_cli_argument_errors_preserve_unicode(self):
+        result = self.cli("不存在的命令")
+        self.assertEqual(2, result.returncode)
+        self.assertEqual("", result.stdout)
+        self.assertIn("不存在的命令", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
 
     def test_unknown_unquoted_label_is_retained_as_uncertain(self):
         item = self.review_feedback(["说不上来，先观察"], ["图记忆或许有用"], [["图记忆"]])[0]
@@ -387,6 +388,8 @@ class RadarFeedbackTests(unittest.TestCase):
         missing_confirmation = self.cli("record-feedback", "--profile", str(profile_path), "--feedback", str(batch_path))
         self.assertEqual(1, missing_confirmation.returncode)
         self.assertIn("--confirm", missing_confirmation.stdout)
+        self.assertIn("不能自动导入旧 proposal", missing_confirmation.stdout)
+        self.assertEqual("", missing_confirmation.stderr)
         batch["feedback"][1]["evidence"]["source_identity"]["version"] = "unverified"
         batch_path.write_text(json.dumps(batch, ensure_ascii=False), encoding="utf-8")
         archive = self.root / "archive.json"

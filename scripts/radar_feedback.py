@@ -13,6 +13,7 @@ import argparse
 import hashlib
 import json
 import re
+import sys
 import uuid
 from collections import Counter
 from datetime import datetime, timezone
@@ -699,6 +700,10 @@ def command_show_guidance(args: argparse.Namespace) -> int:
 
 
 def main() -> int:
+    # Pipes on Windows can default to a code page that cannot represent Chinese.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="backslashreplace")
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     init = commands.add_parser("init", help="create a visible Chinese project feedback profile")

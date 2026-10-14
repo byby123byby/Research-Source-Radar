@@ -20,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import research_contract as rc
 import install_skill as installer
+import discovery_plan
 
 
 CHECKED_AT = "2020-01-01T00:00:00+00:00"
@@ -877,15 +878,23 @@ class ResearchContractTests(unittest.TestCase):
         ):
             self.assertIn(marker, skill_text)
 
-    def test_trend_route_is_documented_as_a_sidecar_not_a_recall_replacement(self):
+    def test_trend_route_preserves_core_and_long_tail_coverage(self):
         skill_text = skill_documentation()
         protocol = (SKILL_ROOT / "references/discovery-core-v3.md").read_text(encoding="utf-8")
-        documents = [skill_text]
-        readme_path = SKILL_ROOT / "README.md"
-        if readme_path.exists():
-            documents.append(readme_path.read_text(encoding="utf-8"))
-        for text in documents:
-            self.assertIn("sidecar", text)
+        for domain in ("computing", "health", "humanities"):
+            with self.subTest(domain=domain):
+                plan = discovery_plan.build_plan({
+                    "question": "recover overlooked methods",
+                    "domain": domain,
+                    "budget_profile": "recovery",
+                    "project_frame": {"mechanism_terms": ["state estimation"]},
+                })
+                query_lanes = {query["lane"] for query in plan["queries"] if query["query"].strip()}
+                self.assertTrue({"exact", "mechanism", "artifact", "validation", "attention", "reuse"} <= query_lanes)
+                minimums = plan["usefulness_policy"]["per_round_minimums"]
+                self.assertGreaterEqual(minimums["attention"], 1)
+                self.assertGreaterEqual(minimums["artifact_or_relation"], 1)
+                self.assertLessEqual(sum(minimums.values()), plan["budget"]["query_records"])
         self.assertIn("relevant_but_not_hot", skill_text)
         self.assertIn("core relevance routes", skill_text)
         self.assertIn("quiet source", skill_text)

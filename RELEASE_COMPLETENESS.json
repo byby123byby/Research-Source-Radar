@@ -206,7 +206,7 @@
       "positive_tests": [
         {"path": "scripts/test_research_contract.py", "marker": "def test_completed_trend_sweep_is_valid_and_routes_candidate("},
         {"path": "scripts/test_research_contract.py", "marker": "def test_source_ecosystems_and_time_windows_are_explicit_and_bounded("},
-        {"path": "scripts/test_research_contract.py", "marker": "def test_trend_route_is_documented_as_a_sidecar_not_a_recall_replacement("}
+        {"path": "scripts/test_research_contract.py", "marker": "def test_trend_route_preserves_core_and_long_tail_coverage("}
       ],
       "negative_tests": [
         {"path": "scripts/test_research_contract.py", "marker": "def test_trend_popularity_cannot_be_promoted_to_evidence_quality("},
