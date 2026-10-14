@@ -1,70 +1,38 @@
-# Missed-Source Recovery v5
+# Project-driven discovery
 
-Use this route by default for an open-ended research request asking for related papers, projects, methods, current work, alternatives, or ideas that could change the direction of the work. It also handles the explicit complaint that ordinary AI search returns plausible material but misses the valuable few. This route is deliberately broader than a fast shortlist. It optimizes recovery of high-value neighbors and known leads before token economy, within a fixed budget.
+Use this route for ordinary open-ended requests, not only complaints about missed sources. Read `structural-transfer.md` for the planner's current input contract. The host performs retrieval and semantic analysis; scripts provide explicit plans and evidence gates.
 
-## One Ranked Result
+## Plan before broad searching
 
-Return one ranked list of at most six candidates. Give each candidate one role: `direct`, `mechanism`, `validation`, `current`, or `adjacent`. A role describes why the source is useful; it does not reserve a slot or lower the identity and evidence gates. The shared limits and budgets live in `runtime-contract-v1.json`.
+Build a short project frame from authorized context, preserving evidence and uncertainty. Translate the bottleneck into distinct queries, rather than appending different route names to the same keywords. Use `discovery_plan.py` and execute its query IDs through available search tools.
 
-## Required Coverage
+Cover these opportunities in one call:
 
-Before stopping, attempt at least four distinct lanes, chosen from:
+- Direct problem/constraint matches.
+- Mechanism neighbors with genuinely different terminology.
+- Structural transfer from other fields, including independent methods with no shared citations.
+- Dated popular/recent signals from relevant communities and release records.
+- Long-tail recovery through surveys, catalogues, implementations, citations, datasets and other real relations.
+- Validation, limitations, negative results and competing explanations across the above routes.
 
-1. exact or decomposed problem terms;
-2. mechanism and neighboring terminology;
-3. implementation, dependency, dataset, or successor ecosystem;
-4. evaluation, failure, limitation, correction, or replication;
-5. dated current-work and independent technical attention;
-6. one concrete adjacent-domain bridge.
+A bridge hypothesis can generate a search before a source is found. It cannot establish that a resulting source transfers successfully. Inspect the original source to support or reject the mapping. For non-quantitative research, preserve context and normative/interpretive assumptions rather than inventing equations.
 
-For an open-ended request, decompose the target into capability atoms before searching. At least one query must be generated from a mechanism family that is not simply a restatement of the user's wording. Examples include temporal validity, consolidation or forgetting, entity linking, graph or lexical retrieval, workflow compilation, observation reduction, verification, or provenance. If the first batch returns only direct matches, the next batch must target the most valuable uncovered family; direct-match sufficiency is not a stop condition for recovery.
+## Execute a backlog, not a list of purported searches
 
-### Six-Slot Recall Plan
+The planner may propose more queries than fit one round. Choose distinct routes first, then use remaining capacity for informative expansions. After resolving sources, add observed `seed_relations` and rerun the plan if needed. Do not spend all rounds paraphrasing the initial question. A source registry, catalogue or curated list is a lead generator; returned candidates still need identity and project-fit checks.
 
-The six query records have distinct jobs. This prevents a superficially diverse trace from being six variants of the same broad query:
+Use `runtime-contract-v1.json` for all numerical limits. Budgets are per round for recovery, with a declared round cap. The pool is not the display limit. The configured values are provisional resource controls, not empirically optimal thresholds. The default has no total elapsed-time cutoff; user-imposed deadlines can still apply. Deep reading of selected sources is a separate, explicitly scoped operation.
 
-1. **Anchor:** resolve the task and its deployment boundary.
-2. **Competing vocabulary:** use neighboring terminology rather than a synonym-only rewrite.
-3. **Candidate reservoir:** query a domain-native index that reveals sibling work. Examples include a repository topic or curated collection, survey or review, benchmark/leaderboard, package or dataset ecosystem, conference/artifact list, bibliography, catalog, registry, archive finding aid, or professional-society list.
-4. **Contrast/failure:** seek alternatives, limitations, successors, negative results, or abandoned paths.
-5. **Anchor expansion:** after at least one identity-valid candidate is found, query a concrete relation around it: related/citing work, maintainers or lab, dependency, benchmark, dataset, alternative implementation, or successor. This slot must not merely repeat the original task terms.
-6. **Coverage probe:** spend the final record on the highest-value uncovered family, or record the unavailable ecosystem and reason.
+Track each route as yielded, empty, blocked, not applicable with reason, or unattempted. Do not call blocked routes empty or complete. Stop when a full diverse expansion round yields no new identity-valid target-matched candidates and routes have been addressed, or when the user/declared resource cap stops the run. Network failures do not establish saturation. On a cap stop retain pending queries and gaps, not a claim of complete search.
 
-The reservoir is a discovery mechanism, not evidence. Each candidate it exposes must still pass canonical identity, two-anchor relevance, and mechanism/evidence checks. If an anchor cannot be resolved in time, mark the anchor-expansion slot unavailable and redirect only that one slot to the highest-value unrepresented family; record the reason in `gaps` and `stop_evidence`.
+## Select and explain
 
-The query plan may use up to two batched search calls, six query records, two targeted opens, and one coverage probe. The coverage probe consumes one of the six query records; it is not an additional seventh query. `queries` must equal `budget_used.query_records`. Used plus actionable remaining capacity must never exceed the declared budget; dependent capacity may be zero once the query or time boundary makes it unusable. Stop after the first batch when five identity-valid candidates cover four source families and all required lanes attempted so far are represented. In a 300-second run, start no new discovery after 210 seconds and preserve at least 60 seconds for identity checks, deduplication, ranking, trace completion, and serialization. At the boundary, finalize from the verified ledger instead of trying to fill all six source slots. A slow or unavailable ecosystem becomes an explicit gap. Do not retry the same query without a recorded changed term and reason.
+Use one ranked list, normally the runtime contract's default size. User-requested sizes are bounded by the output contract. Do not pad the list. Roles identify direct, mechanism, validation, current or adjacent contributions; they do not reserve equal buckets.
 
-## Candidate Contract
+Apply canonical identity and two concrete target anchors first. Structural correspondences may supply anchors without topical overlap. Rank primarily by project benefit, actual fit, evidence and adaptation burden; recent attention and preferences are bounded supporting signals. Each cross-domain card explains the common structure, mapping, assumptions, failure boundary and smallest worthwhile check.
 
-Every candidate needs:
+A feedback event may expand a query or affect ranking only after its original evidence and same-project binding pass. Keep query lineage, applied ranking effects and unused/quarantined reasons. Do not turn a candidate-level rejection into a tag blacklist. Preserve exploration that challenges current preferences.
 
-- canonical identity or an explicit unresolved status;
-- two concrete anchors to the target card;
-- one mechanism or evidence bridge;
-- one reason it could change the project direction;
-- direct-use versus transfer-only fit;
-- the source family and discovery lane;
-- one limitation or hard negative.
+## Trace
 
-Popularity, stars, citations, or repeated mentions can prioritize a search path, but cannot satisfy the candidate contract. A user-supplied project is a recovery target, not a novel discovery.
-
-## Required Trace
-
-When this route is used, include `mode`, `route=recovery`, `attempted_families`, `covered_families`, `uncovered_families`, `budget_used`, `budget_remaining`, and `stop_evidence` in `discovery_trace`. Compute known-lead recovery and new-neighbor metrics outside the model response so the model cannot grade itself.
-
-## Reranking
-
-Use the following order after identity normalization:
-
-1. identity and evidence validity;
-2. uncovered-family value;
-3. mechanism bridge and task fit;
-4. project-moving potential and next experiment;
-5. direct deployment fit;
-6. freshness, maintenance, and risk.
-
-This order intentionally differs from the ordinary fast route. A mechanism neighbor that cannot run directly can still rank highly when its transfer bridge is concrete. A directly deployable but repetitive source should not consume the list.
-
-## Evaluation
-
-Evaluate this route with a declared name-hidden recovery set and a separate blind review of new neighbors. Report direct-fit quality, known-lead recovery, novel-neighbor recovery, family coverage, identity validity, token cost, and elapsed time separately. Do not replace the recovery result with generic nDCG, and do not claim universal superiority from a small pilot.
+Record executed query IDs, actual sources/tools, dates, budget used per round, route outcomes, pending queries, verified identities, bridge hypotheses/evidence, preference consumption and stop reason. Planned queries do not count as executed coverage. User-known anchors do not count as novel discoveries. All effectiveness scoring belongs to a separate evaluation, not the model's own claims.

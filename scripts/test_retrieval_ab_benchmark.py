@@ -344,16 +344,17 @@ class RetrievalABBenchmarkTests(unittest.TestCase):
         invalid["discovery_trace"].pop("attempted_families", None)
         self.assertTrue(any("attempted_families" in error for error in ab.validate_answer(invalid)))
 
-    def test_recovery_route_rejects_a_seventh_gap_probe_query(self):
+    def test_recovery_route_rejects_gap_probe_query_above_current_budget(self):
+        query_count = ab.PROFILE_CONTRACTS["recovery"]["budget"]["query_records"] + 1
         enriched = answer("recovery-budget-overrun")
         enriched["queries"] = [
             {"query": f"recovery query {index}", "source": "authoritative index"}
-            for index in range(1, 8)
+            for index in range(1, query_count + 1)
         ]
         trace = discovery_trace()
         trace.update({
             "route": "recovery",
-            "budget_used": {"query_records": 7, "targeted_opens": 2, "gap_probes": 1},
+            "budget_used": {"query_records": query_count, "targeted_opens": 2, "gap_probes": 1},
             "budget_remaining": {"query_records": 0, "targeted_opens": 0, "gap_probes": 0},
         })
         enriched["discovery_trace"] = trace

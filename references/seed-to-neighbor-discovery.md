@@ -40,9 +40,13 @@ Describe the seed without marketing language:
 
 Use this fingerprint to search for functional neighbors even when they use different names or cannot run directly in the target environment.
 
+For structurally related methods from independent fields, use `structural-transfer.md` and pass `mechanism_bridges` to `scripts/discovery_plan.py`. Search the other field's vocabulary, not just the seed name. Record source-role/target-role mappings, assumptions, break conditions and project benefit. A shared word or similar-looking equation is not evidence of equivalence, and the absence of shared citations is not evidence against a useful correspondence.
+
 ## 3A. Source-to-Target Translation Completeness Gate
 
 When the seed is a paper, repository, or model and the user asks to borrow/translate, treat source-to-target translation completeness as a dedicated gate; do not rely only on titles and README.
+
+Build the inventory from original materials with `scripts/mechanism_transfer.py inventory --material M1=paper.md --material M2=supplement.md --output inventory.json`. Create the schema-2 reading ledger defined in `structural-transfer.md` and run `scripts/mechanism_transfer.py --ledger reading-ledger.json --output reading-audit.json` before a completion claim. This supplements, rather than replaces, the formal `research_contract.py` evidence checks. The gate rechecks source hashes, regenerates section units and supplement mentions, and blocks completion for unavailable known supplements, unmatched versions, missing target behavior evidence or unexplained units. Also compare the original contents/module map: materials never obtained or never mentioned in the supplied files still need reviewer follow-up. The same requirement applies to methods, legal frameworks, humanities arguments and artistic processes, with appropriate case/argument/practice evidence instead of forcing code tests.
 
 先建立来源能力清单，再逐项对目标系统做映射：
 
@@ -73,7 +77,7 @@ Run all applicable paths and record exact queries or API calls:
 3. **Metadata path:** title, author, keyword, venue, funder, and date queries through authoritative metadata services such as the [Crossref REST API](https://www.crossref.org/documentation/retrieve-metadata/rest-api/).
 4. **Mechanism-transfer path:** search the mechanism fingerprint, adjacent-field terminology, runtime-incompatible implementations, benchmarks, and evaluation methods.
 5. **Failure path:** search limitations, archived or abandoned repositories, negative results, security issues, retractions, corrections, and failed reproductions.
-6. **Current-attention path:** when requested, search dated releases, repository activity, independent technical coverage, conference demos, newsletters, and community discussion under the trend-discovery rules. Attention remains a lead, not evidence quality.
+6. **Current-attention path:** in open-ended discovery, search dated releases, repository activity, independent technical coverage, conference demos, newsletters, and community discussion under the trend-discovery rules. Attention remains a lead, not evidence quality.
 
 Do not let one search engine or one recommendation API define the candidate set. Record inaccessible paths as gaps.
 

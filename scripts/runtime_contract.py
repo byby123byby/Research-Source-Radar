@@ -136,8 +136,13 @@ def validate_runtime_contract(data: Any) -> list[str]:
             stop_after = completion.get("stop_new_discovery_after_seconds")
             if not isinstance(reserve, int) or isinstance(reserve, bool) or not 30 <= reserve <= 180:
                 errors.append("profiles.recovery.completion_policy.reserve_finalization_seconds is invalid")
-            if not isinstance(stop_after, int) or isinstance(stop_after, bool) or not 60 <= stop_after <= 600:
+            if stop_after is not None and (not isinstance(stop_after, int) or isinstance(stop_after, bool) or stop_after < 1):
                 errors.append("profiles.recovery.completion_policy.stop_new_discovery_after_seconds is invalid")
+            if completion.get("budget_scope") != "per_round":
+                errors.append("recovery budgets must be per_round")
+            rounds = completion.get("max_discovery_rounds")
+            if not isinstance(rounds, int) or isinstance(rounds, bool) or not 1 <= rounds <= 10:
+                errors.append("recovery max_discovery_rounds must be between 1 and 10")
             if completion.get("finalize_from_verified_ledger_on_deadline") is not True:
                 errors.append("profiles.recovery.completion_policy must finalize from the verified ledger")
             if completion.get("gap_probe_counts_toward_query_records") is not True:

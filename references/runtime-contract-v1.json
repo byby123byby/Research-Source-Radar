@@ -38,32 +38,35 @@
       }
     },
     "recovery": {
-      "candidate_pool": {"min": 10, "max": 20},
+      "candidate_pool": {"min": 20, "max": 60},
       "max_sources": 12,
-      "budget": {"batched_search_calls": 2, "query_records": 6, "targeted_opens": 2, "gap_probes": 1},
+      "budget": {"batched_search_calls": 3, "query_records": 10, "targeted_opens": 6, "gap_probes": 1},
       "early_stop": {
-        "min_identity_valid_candidates": 5,
-        "min_distinct_families": 4,
-        "stop_after_first_batch_when_covered": true,
+        "min_identity_valid_candidates": 10,
+        "min_distinct_families": 5,
+        "stop_after_first_batch_when_covered": false,
         "allow_one_gap_probe_when_incomplete": true,
-        "minimum_discovery_lanes": 4
+        "minimum_discovery_lanes": 6
       },
       "network_policy": {
-        "soft_timeout_seconds": 8,
-        "hard_timeout_seconds": 20,
-        "same_query_retries": 0,
+        "soft_timeout_seconds": 30,
+        "hard_timeout_seconds": 90,
+        "same_query_retries": 1,
         "on_timeout": "record_gap_and_continue"
       },
       "completion_policy": {
         "reserve_finalization_seconds": 60,
-        "stop_new_discovery_after_seconds": 210,
+        "stop_new_discovery_after_seconds": null,
+        "budget_scope": "per_round",
+        "max_discovery_rounds": 3,
+        "stop_rule": "Stop after an all-routes-addressed full round with zero new identity-valid target-matched candidates, user stop, or the declared round/resource cap. Blocked routes remain gaps; cap exhaustion is not saturation.",
         "finalize_from_verified_ledger_on_deadline": true,
         "gap_probe_counts_toward_query_records": true
       }
     },
     "standard": {
       "candidate_pool": {"min": 18, "max": 30},
-      "max_sources": 8,
+      "max_sources": 12,
       "budget": {"batched_search_calls": 3, "query_records": 8, "targeted_opens": 3, "gap_probes": 1},
       "early_stop": {
         "min_identity_valid_candidates": 6,
@@ -86,9 +89,10 @@
       "mechanism_neighbor",
       "artifact_or_ecosystem",
       "validation_or_failure",
-      "current_or_attention"
+      "current_or_attention",
+      "structural_transfer"
     ],
-    "minimum_attempted_families": 4,
-    "required_lanes": ["mechanism", "artifact", "validation", "attention"]
+    "minimum_attempted_families": 6,
+    "required_lanes": ["exact", "mechanism", "artifact", "validation", "attention", "adjacent"]
   }
 }

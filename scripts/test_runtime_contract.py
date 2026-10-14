@@ -23,8 +23,12 @@ class RuntimeContractTests(unittest.TestCase):
         self.assertEqual(12, runtime.DEFAULT_MAX_SOURCES)
         self.assertEqual(12, runtime.PROFILE_CONTRACTS["recovery"]["max_sources"])
         recovery = runtime.PROFILE_CONTRACTS["recovery"]
-        self.assertEqual(6, recovery["budget"]["query_records"])
+        self.assertEqual(10, recovery["budget"]["query_records"])
+        self.assertEqual({"min": 20, "max": 60}, recovery["candidate_pool"])
+        self.assertEqual(30, recovery["network_policy"]["soft_timeout_seconds"])
+        self.assertEqual(90, recovery["network_policy"]["hard_timeout_seconds"])
         self.assertEqual(60, recovery["completion_policy"]["reserve_finalization_seconds"])
+        self.assertIsNone(recovery["completion_policy"]["stop_new_discovery_after_seconds"])
 
     def test_runtime_contract_rejects_divergent_recovery_limit(self):
         mutated = copy.deepcopy(runtime.RUNTIME_CONTRACT)
@@ -53,7 +57,8 @@ class RuntimeContractTests(unittest.TestCase):
 
     def test_runtime_contract_rejects_inverted_network_timeouts(self):
         mutated = copy.deepcopy(runtime.RUNTIME_CONTRACT)
-        mutated["profiles"]["recovery"]["network_policy"]["soft_timeout_seconds"] = 30
+        policy = mutated["profiles"]["recovery"]["network_policy"]
+        policy["soft_timeout_seconds"] = policy["hard_timeout_seconds"] + 1
         self.assertTrue(any("network_policy values" in item for item in runtime.validate_runtime_contract(mutated)))
 
     def test_preflight_passes_current_release_contract(self):

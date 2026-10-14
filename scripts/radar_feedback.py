@@ -10,8 +10,10 @@ Radar discovery run alongside the project brief.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
+import uuid
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
@@ -72,7 +74,53 @@ TIER_TITLES = {
     "watchlist": "持续关注",
 }
 REVIEW_HEADING = re.compile(r"^### (?P<candidate_id>[^\s]+) · (?P<title>.+)$")
-REVIEW_FIELD = re.compile(r"^你的(?P<field>标注|理由)：`(?P<value>.*)`$")
+REVIEW_FIELD = re.compile(r"^你的(?P<field>标注|理由|偏好范围|确认维度)[：:]\s*(?P<value>.*)$")
+NON_AFFIRMATIVE = re.compile(r"不|没|未|无|非|拒绝|避免|排除|可能|待验证|\b(?:not|no|never|without|avoid|uncertain)\b", re.I)
+
+
+def parse_review_blocks(text: str) -> dict[str, dict[str, str]]:
+    blocks: dict[str, dict[str, str]] = {}
+    current = None
+    for line in text.splitlines():
+        heading = REVIEW_HEADING.match(line.strip())
+        if heading:
+            candidate_id = heading.group("candidate_id")
+            if candidate_id in blocks:
+                raise ValueError(f"duplicate review candidate: {candidate_id}")
+            current = blocks[candidate_id] = {"title": heading.group("title")}
+            continue
+        field = REVIEW_FIELD.match(line.strip())
+        if field:
+            if current is None:
+                raise ValueError("review field has no candidate heading")
+            key, value = field.group("field"), field.group("value")
+            if len(value) >= 2 and value.startswith("`") and value.endswith("`"):
+                value = value[1:-1]
+            if key in current:
+                raise ValueError(f"duplicate review field: {key}")
+            current[key] = value
+        elif current is not None:
+            for prefix, key in (("来源：", "url"), ("来源版本：", "version")):
+                if line.startswith(prefix):
+                    if key in current:
+                        raise ValueError(f"duplicate review field: {key}")
+                    current[key] = line[len(prefix):].strip()
+    return blocks
+
+
+def review_dimensions(fields: dict[str, str]) -> tuple[str, list[str]]:
+    raw_scope = fields.get("偏好范围", "").strip()
+    raw_terms = fields.get("确认维度", "").strip()
+    scopes = {"": "candidate", "待填写": "candidate", "当前候选": "candidate",
+              "candidate": "candidate", "维度": "dimension", "dimension": "dimension"}
+    if raw_scope not in scopes:
+        raise ValueError("偏好范围须明确填写 当前候选 或 维度")
+    terms = [] if raw_terms in {"", "待填写"} else clean_string_list(
+        re.split(r"[、,，;；]", raw_terms), "你的确认维度")
+    scope = scopes[raw_scope]
+    if (scope == "dimension") != bool(terms):
+        raise ValueError("按维度反馈须同时填写 偏好范围：维度 和非空确认维度；只评候选请留空维度")
+    return scope, terms
 
 
 def now_iso() -> str:
@@ -101,11 +149,12 @@ def require_keys(value: Any, expected: set[str], field: str) -> dict[str, Any]:
     return value
 
 
-def make_profile(project_name: str, project_description: str, constraints: list[str]) -> dict[str, Any]:
+def make_profile(project_name: str, project_description: str, constraints: list[str], project_id: str | None = None) -> dict[str, Any]:
     return {
         "schema_version": SCHEMA_VERSION,
         "language": "zh-CN",
         "project": {
+            "id": project_id or str(uuid.uuid4()),
             "name": clean_text(project_name, "project_name"),
             "description": clean_text(project_description, "project_description"),
             "constraints": list(dict.fromkeys(constraints)),
@@ -131,7 +180,12 @@ def validate_profile(value: Any) -> dict[str, Any]:
     )
     if profile["schema_version"] != SCHEMA_VERSION or profile["language"] != "zh-CN":
         raise ValueError("profile schema_version or language is unsupported")
-    project = require_keys(profile["project"], {"name", "description", "constraints"}, "profile.project")
+    project_fields = {"name", "description", "constraints"}
+    if isinstance(profile["project"], dict) and "id" in profile["project"]:
+        project_fields.add("id")
+    project = require_keys(profile["project"], project_fields, "profile.project")
+    if "id" in project:
+        clean_text(project["id"], "profile.project.id")
     clean_text(project["name"], "profile.project.name")
     clean_text(project["description"], "profile.project.description")
     clean_string_list(project["constraints"], "profile.project.constraints", maximum=40)
@@ -141,7 +195,7 @@ def validate_profile(value: Any) -> dict[str, Any]:
     for index, item in enumerate(profile["feedback"]):
         feedback = require_keys(
             item,
-            {"feedback_id", "candidate_id", "title", "label", "reason", "tags", "created_at"},
+            {"feedback_id", "candidate_id", "title", "label", "reason", "tags", "created_at"} | ({"evidence"} if isinstance(item, dict) and "evidence" in item else set()),
             f"profile.feedback[{index}]",
         )
         feedback_id = clean_text(feedback["feedback_id"], f"profile.feedback[{index}].feedback_id")
@@ -179,7 +233,7 @@ def validate_feedback_batch(value: Any) -> list[dict[str, Any]]:
     for index, item in enumerate(feedback_items):
         feedback = require_keys(
             item,
-            {"candidate_id", "title", "label", "reason", "tags"},
+            {"candidate_id", "title", "label", "reason", "tags"} | ({"evidence"} if isinstance(item, dict) and "evidence" in item else set()),
             f"feedback_batch.feedback[{index}]",
         )
         candidate_id = clean_text(feedback["candidate_id"], f"feedback_batch.feedback[{index}].candidate_id")
@@ -195,20 +249,110 @@ def validate_feedback_batch(value: Any) -> list[dict[str, Any]]:
             "label": label,
             "reason": clean_text(feedback["reason"], f"feedback_batch.feedback[{index}].reason", allow_empty=True),
             "tags": clean_string_list(feedback["tags"], f"feedback_batch.feedback[{index}].tags"),
+            **({"evidence": feedback["evidence"]} if "evidence" in feedback else {}),
         })
     return parsed
 
 
-def derive_guidance(feedback: list[dict[str, Any]]) -> dict[str, list[str]]:
+def feedback_issue(item: Any, project_id: str, *, source_cache: dict[str, str] | None = None) -> str | None:
+    """Return a quarantine reason unless a user judgment has original evidence.
+
+    References are local, user-authorized review snapshots, not source URLs or
+    model relevance scores. A changed/deleted snapshot invalidates consumption.
+    """
+    if not isinstance(item, dict) or not isinstance(item.get("evidence"), dict):
+        return "legacy_or_missing_user_evidence"
+    evidence = item["evidence"]
+    if not project_id or evidence.get("project_id") != project_id:
+        return "project_mismatch"
+    if evidence.get("status") != "confirmed" or evidence.get("confidence") != "user_explicit":
+        return "unconfirmed_user_evidence"
+    if evidence.get("candidate_id") != item.get("candidate_id") or evidence.get("candidate_title") != item.get("title"):
+        return "candidate_identity_mismatch"
+    identity = evidence.get("source_identity")
+    if not isinstance(identity, dict) or not all(isinstance(identity.get(key), str) and identity[key].strip() for key in ("url", "version")):
+        return "missing_source_identity_or_version"
+    if identity["version"].casefold() in {"unverified", "unknown", "latest", "head", "main", "master"}:
+        return "unpinned_source_version"
+    try:
+        datetime.fromisoformat(evidence["verified_at"].replace("Z", "+00:00"))
+    except (KeyError, AttributeError, TypeError, ValueError):
+        return "missing_or_invalid_verification_time"
+    raw_label, raw_reason = evidence.get("raw_label"), evidence.get("raw_reason")
+    if not isinstance(raw_label, str) or not isinstance(raw_reason, str):
+        return "missing_raw_user_judgment"
+    try:
+        if normalize_review_label(raw_label, raw_reason) != item.get("label"):
+            return "label_mapping_mismatch"
+    except ValueError:
+        return "unresolved_label"
+    terms = evidence.get("confirmed_terms")
+    if not isinstance(terms, list) or len(terms) > 24 or any(not isinstance(term, str) or not term.strip() or term not in raw_reason for term in terms):
+        return "preference_terms_not_grounded_in_user_reason"
+    if terms and evidence.get("scope") != "dimension":
+        return "dimension_scope_not_confirmed"
+    if evidence.get("scope") not in {"candidate", "dimension"}:
+        return "invalid_feedback_scope"
+    if clean_text(raw_reason, "raw_reason", allow_empty=True) != item.get("reason"):
+        return "reason_mapping_mismatch"
+    ref = evidence.get("source_ref")
+    if not isinstance(ref, dict) or not all(isinstance(ref.get(key), str) and ref[key] for key in ("path", "sha256")):
+        return "missing_original_input_reference"
+    cache = source_cache if source_cache is not None else {}
+    try:
+        if ref["path"] not in cache:
+            cache[ref["path"]] = Path(ref["path"]).expanduser().read_text(encoding="utf-8")
+        original = cache[ref["path"]]
+    except (OSError, UnicodeError):
+        return "original_input_unavailable"
+    if hashlib.sha256(original.encode("utf-8")).hexdigest() != ref["sha256"]:
+        return "original_input_changed"
+    try:
+        original_item = parse_review_blocks(original).get(item["candidate_id"])
+    except ValueError:
+        return "duplicate_or_invalid_original_review"
+    if original_item is None:
+        return "candidate_missing_or_duplicated_in_original"
+    if original_item.get("title") != item["title"] or original_item.get("标注", "") != raw_label or original_item.get("理由", "") != raw_reason:
+        return "original_judgment_mismatch"
+    if original_item.get("url") != identity["url"]:
+        return "original_source_url_mismatch"
+    if original_item.get("version") != identity["version"]:
+        return "original_source_version_missing_or_mismatched"
+    try:
+        original_scope, original_terms = review_dimensions(original_item)
+    except ValueError:
+        return "invalid_original_dimension_confirmation"
+    if evidence["scope"] != original_scope or terms != original_terms:
+        return "original_dimension_confirmation_mismatch"
+    if original_scope == "dimension":
+        confirmation = evidence.get("dimension_confirmation")
+        if not isinstance(confirmation, dict) or confirmation != {
+            "raw_scope": original_item["偏好范围"], "raw_terms": original_item["确认维度"],
+        }:
+            return "missing_or_mismatched_dimension_confirmation"
+        if item["label"] in POSITIVE_LABELS:
+            clauses = re.split(r"[，,。；;！？!?\n]", raw_reason)
+            for term in terms:
+                if not any(term in clause and not NON_AFFIRMATIVE.search(clause) for clause in clauses):
+                    return f"positive_term_negated_or_uncertain: {term}；请在新评审快照中明确肯定的维度"
+    return None
+
+
+def derive_guidance(feedback: list[dict[str, Any]], project_id: str = "") -> dict[str, list[str]]:
+    cache: dict[str, str] = {}
+    original_count = len(feedback)
+    feedback = [item for item in feedback if feedback_issue(item, project_id, source_cache=cache) is None]
     approved = Counter(
-        tag for item in feedback if item["label"] in POSITIVE_LABELS for tag in item["tags"]
+        tag for item in feedback if item["label"] in POSITIVE_LABELS for tag in item["evidence"]["confirmed_terms"]
     )
     avoid = Counter(
-        tag for item in feedback if item["label"] in NEGATIVE_LABELS for tag in item["tags"]
+        tag for item in feedback if item["label"] in NEGATIVE_LABELS for tag in item["evidence"]["confirmed_terms"]
     )
     approved_tags = [tag for tag, _ in approved.most_common(12)]
     avoid_tags = [tag for tag, _ in avoid.most_common(12)]
     guidance = [
+        f"原始证据门禁：{len(feedback)} 条可用，{original_count - len(feedback)} 条隔离；旧缓存提示不作为偏好来源。",
         "优先覆盖问题直连、热门前沿、跨领域机制和关联扩散四条路径；不要仅按关键词相似排序。",
         "将用户已知项目保留为锚点，但不把它们计入新发现。",
         "保留至少 20% 的探索候选；负面反馈只降低排序，不自动屏蔽尚未核验的新机制。",
@@ -244,15 +388,25 @@ def merge_feedback(profile: dict[str, Any], incoming: list[dict[str, Any]]) -> d
     updated = json.loads(json.dumps(validate_profile(profile), ensure_ascii=False))
     entries = updated["feedback"]
     existing_candidate_ids = {item["candidate_id"] for item in entries}
+    project_id = updated["project"].get("id", "")
+    source_cache: dict[str, str] = {}
+    issues = []
     for item in incoming:
+        issue = feedback_issue(item, project_id, source_cache=source_cache)
+        if issue:
+            issues.append(f"{item.get('candidate_id')}: {issue}")
         if item["candidate_id"] in existing_candidate_ids:
-            raise ValueError(f"candidate already has feedback: {item['candidate_id']}")
+            issues.append(f"candidate already has feedback: {item['candidate_id']}")
+        existing_candidate_ids.add(item["candidate_id"])
+    if issues:
+        raise ValueError("feedback quarantined；整批未写入：" + "; ".join(issues)
+                         + "。请补齐问题候选，或将完整候选复制到新的评审快照后重新 extract-review；不要复用旧 proposal。")
+    for item in incoming:
         entry = dict(item)
         entry["feedback_id"] = feedback_id(len(entries) + 1, item)
         entry["created_at"] = now_iso()
         entries.append(entry)
-        existing_candidate_ids.add(item["candidate_id"])
-    updated["derived_guidance"] = derive_guidance(entries)
+    updated["derived_guidance"] = derive_guidance(entries, project_id)
     updated["updated_at"] = now_iso()
     return validate_profile(updated)
 
@@ -268,7 +422,8 @@ def validate_candidates(value: Any) -> list[dict[str, Any]]:
     seen: set[str] = set()
     expected = {"candidate_id", "title", "url", "tier", "summary", "why_now", "mechanism_tags", "trend_note"}
     for index, item in enumerate(candidates):
-        candidate = require_keys(item, expected, f"candidates_document.candidates[{index}]")
+        optional = {"source_version", "verified_at", "time_note"}
+        candidate = require_keys(item, expected | (set(item) & optional if isinstance(item, dict) else set()), f"candidates_document.candidates[{index}]")
         candidate_id = clean_text(candidate["candidate_id"], f"candidates_document.candidates[{index}].candidate_id")
         if candidate_id in seen:
             raise ValueError("candidates_document contains duplicate candidate_id")
@@ -284,6 +439,9 @@ def validate_candidates(value: Any) -> list[dict[str, Any]]:
             "why_now": clean_text(candidate["why_now"], f"candidates_document.candidates[{index}].why_now"),
             "mechanism_tags": clean_string_list(candidate["mechanism_tags"], f"candidates_document.candidates[{index}].mechanism_tags"),
             "trend_note": clean_text(candidate["trend_note"], f"candidates_document.candidates[{index}].trend_note", allow_empty=True),
+            "source_version": clean_text(candidate.get("source_version", "unverified"), "candidate.source_version"),
+            "verified_at": clean_text(candidate.get("verified_at", ""), "candidate.verified_at", allow_empty=True),
+            "time_note": clean_text(candidate.get("time_note", "具体发布时间尚未核实；不据此声称近期或热门。"), "candidate.time_note"),
         }
         result.append(cleaned)
     return result
@@ -297,30 +455,21 @@ def normalize_review_label(raw_label: str, raw_reason: str) -> str:
     """
     label = clean_text(raw_label, "review label", allow_empty=True)
     reason = clean_text(raw_reason, "review reason", allow_empty=True)
-    combined = f"{label} {reason}".strip()
+    # Exact explicit labels win. Never infer a positive label from a word in
+    # the reason (e.g. "not top-tier"), or silently promote qualified language.
+    if label in FEEDBACK_LABELS:
+        return label
     if label in FEEDBACK_LABELS.values():
         return next(code for code, title in FEEDBACK_LABELS.items() if title == label)
-    for colloquial, normalized in COLLOQUIAL_LABELS.items():
-        if colloquial in label:
-            return normalized
-    if any(token in combined for token in ("已经知道", "我知道", "已知")):
-        return "already_known"
-    if any(token in combined for token in ("不想再推荐", "不要再推荐", "别再推荐", "避免这类", "不看")):
-        return "avoid_similar"
-    if any(token in combined for token in ("不确定", "不知道", "还需要验证", "需要先验证", "待验证")):
+    if label in COLLOQUIAL_LABELS:
+        return COLLOQUIAL_LABELS[label]
+    aliases = {"多推荐": "worth_deepening", "好好看看": "worth_deepening",
+               "值得做迁移": "worth_deepening", "可以借鉴": "mechanism_to_borrow",
+               "可以借鉴机制": "mechanism_to_borrow", "感觉很一般": "reference_only",
+               "机制参考": "mechanism_to_borrow", "当前不需要": "not_useful_now"}
+    if label in {"可以借鉴", "可以借鉴机制"} and re.search(r"一般|不确定|可能|不知道|需要.*验证", reason):
         return "uncertain"
-    weak_tokens = ("一般般", "可以看看", "值得看看", "不是很重要", "不用重点", "可不看", "不重点", "感觉没用")
-    if any(token in combined for token in weak_tokens):
-        return "reference_only"
-    if any(token in combined for token in ("值得深入", "重点看", "非常想", "很想深入", "夯", "多推荐", "好好看看", "值得做迁移", "多读")):
-        return "worth_deepening"
-    if any(token in combined for token in ("暂时没用", "没有那么想要", "当前不需要")):
-        return "not_useful_now"
-    if any(token in combined for token in ("可借鉴机制", "可以借鉴", "可迁移", "迁移机制", "机制参考")):
-        return "mechanism_to_borrow"
-    if any(token in combined for token in ("值得看", "可以看", "参考", "相关")):
-        return "reference_only"
-    raise ValueError("could not map a Chinese review label; use one of: " + "、".join(FEEDBACK_LABELS.values()))
+    return aliases.get(label, "uncertain")
 
 
 def attention_level(item: dict[str, Any]) -> str:
@@ -336,10 +485,9 @@ def attention_level(item: dict[str, Any]) -> str:
 
 def attention_priority(item: dict[str, Any]) -> int:
     """Return the explicit colloquial order when one was provided."""
-    text = item["reason"]
-    for label, priority in sorted(COLLOQUIAL_PRIORITY.items(), key=lambda pair: len(pair[0]), reverse=True):
-        if label in text:
-            return priority
+    raw_label = item.get("evidence", {}).get("raw_label", "")
+    if raw_label in COLLOQUIAL_PRIORITY:
+        return COLLOQUIAL_PRIORITY[raw_label]
     if item["label"] == "worth_deepening":
         return 4
     if item["label"] == "mechanism_to_borrow":
@@ -349,44 +497,54 @@ def attention_priority(item: dict[str, Any]) -> int:
     return 0
 
 
-def extract_review_feedback(review_text: str, candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def extract_review_feedback(review_text: str, candidates: list[dict[str, Any]], *, project_id: str = "", source_ref: dict[str, str] | None = None) -> list[dict[str, Any]]:
     """Create an inspectable feedback proposal from a completed Chinese review."""
     candidate_map = {candidate["candidate_id"]: candidate for candidate in candidates}
-    parsed: dict[str, dict[str, str]] = {}
-    current_id: str | None = None
-    for line in review_text.splitlines():
-        heading = REVIEW_HEADING.match(line)
-        if heading:
-            candidate_id = heading.group("candidate_id")
-            if candidate_id not in candidate_map:
-                raise ValueError(f"review contains unknown candidate: {candidate_id}")
-            if candidate_id in parsed:
-                raise ValueError(f"review contains duplicate candidate: {candidate_id}")
-            if heading.group("title") != candidate_map[candidate_id]["title"]:
-                raise ValueError(f"review title does not match candidate: {candidate_id}")
-            parsed[candidate_id] = {}
-            current_id = candidate_id
-            continue
-        field = REVIEW_FIELD.match(line)
-        if field and current_id:
-            parsed[current_id][field.group("field")] = field.group("value")
+    parsed = parse_review_blocks(review_text)
+    for candidate_id, fields in parsed.items():
+        if candidate_id not in candidate_map:
+            raise ValueError(f"review contains unknown candidate: {candidate_id}")
+        if fields["title"] != candidate_map[candidate_id]["title"]:
+            raise ValueError(f"review title does not match candidate: {candidate_id}")
 
     proposal: list[dict[str, Any]] = []
     for candidate in candidates:
         candidate_id = candidate["candidate_id"]
         fields = parsed.get(candidate_id, {})
-        raw_label = fields.get("标注", "").strip()
-        raw_reason = fields.get("理由", "").strip()
-        if (not raw_label or raw_label == "待填写") and not raw_reason:
-            raise ValueError(f"review has no completed label for {candidate_id}")
-        if not raw_reason or raw_reason == "待填写":
-            raw_reason = "用户未填写理由；仅保留原始标注，注意力优先级待确认。"
+        raw_label = fields.get("标注", "")
+        raw_reason = fields.get("理由", "")
+        if not raw_label.strip() or raw_label.strip() == "待填写":
+            if any(fields.get(key, "").strip() not in {"", "待填写", "当前候选", "candidate"}
+                   for key in ("理由", "偏好范围", "确认维度")):
+                raise ValueError(f"{candidate_id}: 有理由或维度确认但缺少标注；整批未写入，请补标注或拆分为新评审快照")
+            continue
+        try:
+            scope, terms = review_dimensions(fields)
+        except ValueError as exc:
+            raise ValueError(f"{candidate_id}: {exc}") from exc
         proposal.append({
             "candidate_id": candidate_id,
             "title": candidate["title"],
             "label": normalize_review_label(raw_label, raw_reason),
-            "reason": f"原始标注：{raw_label}。用户理由：{raw_reason}",
+            "reason": raw_reason,
             "tags": candidate["mechanism_tags"],
+            "evidence": {
+                "project_id": project_id,
+                "candidate_id": candidate_id,
+                "candidate_title": candidate["title"],
+                "source_ref": source_ref or {},
+                "source_identity": {"url": candidate["url"], "version": candidate.get("source_version", "unverified")},
+                "raw_label": raw_label,
+                "raw_reason": raw_reason,
+                "ordinal": COLLOQUIAL_PRIORITY.get(raw_label.strip()),
+                "verified_at": candidate.get("verified_at", ""),
+                "confidence": "user_explicit",
+                "status": "unverified",
+                "scope": scope,
+                "confirmed_terms": terms,
+                **({"dimension_confirmation": {"raw_scope": fields["偏好范围"],
+                                               "raw_terms": fields["确认维度"]}} if scope == "dimension" else {}),
+            },
         })
     return validate_feedback_batch({"schema_version": SCHEMA_VERSION, "feedback": proposal})
 
@@ -400,6 +558,7 @@ def render_review(profile: dict[str, Any], candidates: list[dict[str, Any]]) -> 
         "正式标签：`值得深入看`、`可借鉴机制`、`相关但仅作参考`、`暂时没用`、`已经知道`、`不想再推荐这类` 或 `不确定`。",
         "也可以用有顺序的口语标签：`夯 > 顶级 > 人上人 > NPC > 拉完了`。其中 `夯/顶级`≈优先深挖，`人上人`≈可借鉴机制，`NPC`≈相关但仅作参考，`拉完了`≈暂时没用；`避雷`仍表示不想再推荐这类。系统仍会保留你的原话。",
         "也可以写自然中文；导入时会先生成可检查提案。混合或保留语气会保守归为“不确定”，不会擅自当作正向偏好。",
+        "反引号可省略。只有你明确填写 偏好范围：维度 和 确认维度（用顿号分隔，须出现在原始理由中），才按维度使用；不得由模型代填。",
         "",
         "你的理由和标签将只用于生成下一轮可见的中文检索提示；不会读取社交平台历史，也不会训练外部模型。",
         "",
@@ -413,19 +572,23 @@ def render_review(profile: dict[str, Any], candidates: list[dict[str, Any]]) -> 
             lines.extend([
                 f"### {item['candidate_id']} · {item['title']}",
                 f"来源：{item['url']}",
+                f"来源版本：{item.get('source_version', 'unverified')}",
                 f"是什么：{item['summary']}",
                 f"为什么现在看：{item['why_now']}",
+                f"具体时间与依据：{item.get('time_note', '尚未核实，不作近期或热门判断。')}",
                 f"机制标签：{'、'.join(item['mechanism_tags'])}",
                 f"热度/时效说明：{item['trend_note'] or '未把热度作为主要推荐理由。'}",
                 "你的标注：`待填写`",
                 "你的理由：`待填写`",
+                "你的偏好范围：`待填写`",
+                "你的确认维度：`待填写`",
                 "",
             ])
     return "\n".join(lines) + "\n"
 
 
 def command_init(args: argparse.Namespace) -> int:
-    profile = make_profile(args.project_name, args.description, args.constraint or [])
+    profile = make_profile(args.project_name, args.description, args.constraint or [], args.project_id)
     contract.write_json_atomic(Path(args.output).expanduser(), profile)
     print(f"RADAR_PROFILE_READY output={Path(args.output).expanduser()}")
     return 0
@@ -440,9 +603,15 @@ def command_render_review(args: argparse.Namespace) -> int:
 
 
 def command_record(args: argparse.Namespace) -> int:
+    if not getattr(args, "confirm", False):
+        raise ValueError("record-feedback requires --confirm after explicit user confirmation；不能自动导入旧 proposal")
     profile_path = Path(args.profile).expanduser()
     profile = validate_profile(contract.load_json(profile_path))
     incoming = validate_feedback_batch(contract.load_json(Path(args.feedback).expanduser()))
+    if args.confirm:
+        for item in incoming:
+            if isinstance(item.get("evidence"), dict):
+                item["evidence"]["status"] = "confirmed"
     updated = merge_feedback(profile, incoming)
     output = Path(args.output).expanduser() if args.output else profile_path
     contract.write_json_atomic(output, updated)
@@ -452,21 +621,28 @@ def command_record(args: argparse.Namespace) -> int:
 
 def command_replace_feedback(args: argparse.Namespace) -> int:
     """Replace a feedback batch only while preserving an explicit local archive."""
+    if not getattr(args, "confirm", False):
+        raise ValueError("replace-feedback requires --confirm after explicit user confirmation")
     profile_path = Path(args.profile).expanduser()
     archive_path = Path(args.archive).expanduser()
     if profile_path.resolve() == archive_path.resolve():
         raise ValueError("archive path must differ from profile path")
     profile = validate_profile(contract.load_json(profile_path))
     incoming = validate_feedback_batch(contract.load_json(Path(args.feedback).expanduser()))
+    if args.confirm:
+        for item in incoming:
+            if isinstance(item.get("evidence"), dict):
+                item["evidence"]["status"] = "confirmed"
     if archive_path.exists():
         raise ValueError("archive path already exists; choose a new immutable archive path")
-    contract.write_json_atomic(archive_path, profile)
     reset = make_profile(
         profile["project"]["name"],
         profile["project"]["description"],
         profile["project"]["constraints"],
+        profile["project"].get("id"),
     )
     updated = merge_feedback(reset, incoming)
+    contract.write_json_atomic(archive_path, profile)
     contract.write_json_atomic(profile_path, updated)
     print(f"RADAR_FEEDBACK_REPLACED added={len(incoming)} archive={archive_path} output={profile_path}")
     return 0
@@ -477,7 +653,7 @@ def command_refresh_guidance(args: argparse.Namespace) -> int:
     profile_path = Path(args.profile).expanduser()
     profile = validate_profile(contract.load_json(profile_path))
     updated = json.loads(json.dumps(profile, ensure_ascii=False))
-    updated["derived_guidance"] = derive_guidance(updated["feedback"])
+    updated["derived_guidance"] = derive_guidance(updated["feedback"], updated["project"].get("id", ""))
     updated["updated_at"] = now_iso()
     contract.write_json_atomic(profile_path, validate_profile(updated))
     print(f"RADAR_GUIDANCE_REFRESHED total={len(updated['feedback'])} output={profile_path}")
@@ -487,20 +663,32 @@ def command_refresh_guidance(args: argparse.Namespace) -> int:
 def command_extract_review(args: argparse.Namespace) -> int:
     candidates = validate_candidates(contract.load_json(Path(args.candidates).expanduser()))
     review_path = Path(args.review).expanduser()
-    feedback = extract_review_feedback(review_path.read_text(encoding="utf-8"), candidates)
+    review_text = review_path.read_text(encoding="utf-8")
+    feedback = extract_review_feedback(review_text, candidates, project_id=args.project_id, source_ref={
+        "path": str(review_path.resolve()),
+        "sha256": hashlib.sha256(review_text.encode("utf-8")).hexdigest(),
+    })
     proposal = {
         "schema_version": SCHEMA_VERSION,
         "feedback": feedback,
     }
     output = Path(args.output).expanduser()
     contract.write_json_atomic(output, proposal)
+    lines = ["# 用户反馈核对草案", "", "仅是草案；未写入项目画像。缺少版本或证据时不能确认启用。", ""]
+    for item in feedback:
+        lines.extend([f"## {item['candidate_id']} · {item['title']}",
+                      f"原始标注：{item['evidence']['raw_label']}", f"原始理由：{item['evidence']['raw_reason']}",
+                      f"拟记录：{FEEDBACK_LABELS[item['label']]}；范围：{item['evidence']['scope']}；状态：待确认。",
+                      f"用户确认维度：{'、'.join(item['evidence']['confirmed_terms']) or '无；仅保留候选反馈'}",
+                      f"证据：{review_path.resolve()}；SHA256：{item['evidence']['source_ref']['sha256']}", ""])
+    contract.write_text_atomic(output.with_suffix(".review.zh-CN.md"), "\n".join(lines) + "\n", default_mode=0o600)
     print(f"RADAR_FEEDBACK_PROPOSAL_READY candidates={len(feedback)} output={output}")
     return 0
 
 
 def command_show_guidance(args: argparse.Namespace) -> int:
     profile = validate_profile(contract.load_json(Path(args.profile).expanduser()))
-    guidance = profile["derived_guidance"]
+    guidance = derive_guidance(profile["feedback"], profile["project"].get("id", ""))
     print("# 下一轮 Radar 中文提示")
     print(f"项目：{profile['project']['name']}")
     print("已确认偏好：" + ("、".join(guidance["approved_tags"]) or "尚无"))
@@ -516,6 +704,7 @@ def main() -> int:
     init = commands.add_parser("init", help="create a visible Chinese project feedback profile")
     init.add_argument("--output", required=True)
     init.add_argument("--project-name", required=True)
+    init.add_argument("--project-id", help="explicit local project identity; generated if omitted")
     init.add_argument("--description", required=True)
     init.add_argument("--constraint", action="append")
     init.set_defaults(handler=command_init)
@@ -528,11 +717,13 @@ def main() -> int:
     record.add_argument("--profile", required=True)
     record.add_argument("--feedback", required=True)
     record.add_argument("--output")
+    record.add_argument("--confirm", action="store_true", help="use only after explicit user confirmation of this proposal")
     record.set_defaults(handler=command_record)
     replace = commands.add_parser("replace-feedback", help="replace a misparsed batch while keeping an immutable local archive")
     replace.add_argument("--profile", required=True)
     replace.add_argument("--feedback", required=True)
     replace.add_argument("--archive", required=True)
+    replace.add_argument("--confirm", action="store_true", help="use only after explicit user confirmation")
     replace.set_defaults(handler=command_replace_feedback)
     refresh = commands.add_parser("refresh-guidance", help="recompute guidance from raw feedback without changing it")
     refresh.add_argument("--profile", required=True)
@@ -541,6 +732,7 @@ def main() -> int:
     extract.add_argument("--review", required=True)
     extract.add_argument("--candidates", required=True)
     extract.add_argument("--output", required=True)
+    extract.add_argument("--project-id", required=True)
     extract.set_defaults(handler=command_extract_review)
     show = commands.add_parser("show-guidance", help="print the next-run Chinese guidance")
     show.add_argument("--profile", required=True)

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import hashlib
 import json
 import subprocess
 import sys
@@ -11,11 +12,47 @@ import radar_feedback as radar
 
 
 class RadarFeedbackTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.review_index = 0
+
+    def review_feedback(self, labels, reasons, terms=None, candidates=None, confirm=True):
+        candidates = candidates or radar.validate_candidates(self.candidates())[:len(labels)]
+        terms = terms or [[] for _ in labels]
+        lines = []
+        for candidate, label, reason, dimensions in zip(candidates, labels, reasons, terms):
+            lines.extend([
+                f"### {candidate['candidate_id']} · {candidate['title']}",
+                f"来源：{candidate['url']}",
+                f"来源版本：{candidate['source_version']}",
+                f"你的标注：{label}", f"你的理由：{reason}",
+                "你的偏好范围：" + ("维度" if dimensions else "当前候选"),
+                "你的确认维度：" + "、".join(dimensions),
+            ])
+        text = "\n".join(lines) + "\n"
+        self.review_index += 1
+        path = self.root / f"review-{self.review_index}.md"
+        path.write_text(text, encoding="utf-8")
+        items = radar.extract_review_feedback(text, candidates, project_id="test-project", source_ref={
+            "path": str(path), "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+        })
+        if confirm:
+            for item in items:
+                item["evidence"]["status"] = "confirmed"
+        return items
+
+    def cli(self, *args):
+        return subprocess.run([sys.executable, str(Path(radar.__file__).resolve()), *args],
+                              capture_output=True, text=True, check=False)
+
     def profile(self):
         return radar.make_profile(
             "ExampleProject",
             "发现能推动独立 iOS 无障碍 Agent 的研究机会",
             ["非越狱", "中文输出"],
+            "test-project",
         )
 
     def candidates(self):
@@ -31,6 +68,8 @@ class RadarFeedbackTests(unittest.TestCase):
                     "why_now": "可改进 App 位置记忆和纠错。",
                     "mechanism_tags": ["时间记忆", "可审计"],
                     "trend_note": "近期有独立技术讨论。",
+                    "source_version": "v1.0.0",
+                    "verified_at": "2020-01-01T00:00:00+00:00",
                 },
                 {
                     "candidate_id": "C002",
@@ -41,6 +80,8 @@ class RadarFeedbackTests(unittest.TestCase):
                     "why_now": "可启发 Safari 辅助流程。",
                     "mechanism_tags": ["技能编译"],
                     "trend_note": "",
+                    "source_version": "v1.0.0",
+                    "verified_at": "2020-01-01T00:00:00+00:00",
                 },
             ],
         }
@@ -48,22 +89,10 @@ class RadarFeedbackTests(unittest.TestCase):
     def feedback(self):
         return {
             "schema_version": 1,
-            "feedback": [
-                {
-                    "candidate_id": "C001",
-                    "title": "Graph Memory Example",
-                    "label": "worth_deepening",
-                    "reason": "能改变记忆架构。",
-                    "tags": ["时间记忆", "可审计"],
-                },
-                {
-                    "candidate_id": "C002",
-                    "title": "Browser Example",
-                    "label": "avoid_similar",
-                    "reason": "当前不需要浏览器路线。",
-                    "tags": ["浏览器自动化"],
-                },
-            ],
+            "feedback": self.review_feedback(
+                ["worth_deepening", "avoid_similar"],
+                ["时间记忆和可审计能改变记忆架构。", "不想再推荐浏览器自动化路线。"],
+                [["时间记忆", "可审计"], ["浏览器自动化"]]),
         }
 
     def test_profile_feedback_and_guidance_are_visible_and_explicit(self):
@@ -101,13 +130,7 @@ class RadarFeedbackTests(unittest.TestCase):
     def test_not_useful_now_does_not_blacklist_all_candidate_mechanisms(self):
         feedback = {
             "schema_version": 1,
-            "feedback": [{
-                "candidate_id": "C001",
-                "title": "Graph Memory Example",
-                "label": "not_useful_now",
-                "reason": "当前项目不需要这个实现。",
-                "tags": ["图记忆", "截图优先"],
-            }],
+            "feedback": self.review_feedback(["not_useful_now"], ["当前项目不需要截图优先。"], [["截图优先"]]),
         }
         updated = radar.merge_feedback(self.profile(), radar.validate_feedback_batch(feedback))
         self.assertEqual([], updated["derived_guidance"]["avoid_tags"])
@@ -134,7 +157,8 @@ class RadarFeedbackTests(unittest.TestCase):
         proposal = radar.extract_review_feedback(review, radar.validate_candidates(self.candidates()))
         self.assertEqual("mechanism_to_borrow", proposal[0]["label"])
         self.assertEqual("uncertain", proposal[1]["label"])
-        self.assertIn("原始标注", proposal[1]["reason"])
+        self.assertEqual("可能有用但不知道是否适配", proposal[1]["evidence"]["raw_label"])
+        self.assertEqual("需要先验证", proposal[1]["reason"])
 
     def test_review_reason_can_downgrade_a_weak_positive_label(self):
         review = radar.render_review(self.profile(), radar.validate_candidates(self.candidates()))
@@ -145,7 +169,7 @@ class RadarFeedbackTests(unittest.TestCase):
         first_reason = review.find("你的理由：`待填写`")
         review = review[:first_reason] + review[first_reason:].replace("你的理由：`待填写`", "你的理由：`有稳定机制桥接`", 1)
         proposal = radar.extract_review_feedback(review, radar.validate_candidates(self.candidates()))
-        self.assertEqual("reference_only", proposal[0]["label"])
+        self.assertEqual("uncertain", proposal[0]["label"])
         self.assertEqual("mechanism_to_borrow", proposal[1]["label"])
 
     def test_explicit_very_average_label_is_not_promoted(self):
@@ -178,20 +202,16 @@ class RadarFeedbackTests(unittest.TestCase):
             profile_path = root / "profile.json"
             archive_path = root / "profile-misparsed.json"
             profile_path.write_text(json.dumps(radar.merge_feedback(self.profile(), radar.validate_feedback_batch(self.feedback())), ensure_ascii=False), encoding="utf-8")
+            candidate = radar.validate_candidates(self.candidates())[0]
+            candidate.update(candidate_id="C003", title="Corrected Candidate")
             incoming = radar.validate_feedback_batch({
                 "schema_version": 1,
-                "feedback": [{
-                    "candidate_id": "C003",
-                    "title": "Corrected Candidate",
-                    "label": "mechanism_to_borrow",
-                    "reason": "corrected mapping",
-                    "tags": ["revision"],
-                }],
+                "feedback": self.review_feedback(["mechanism_to_borrow"], ["corrected mapping"], candidates=[candidate]),
             })
             original = radar.validate_profile(json.loads(profile_path.read_text(encoding="utf-8")))
             feedback_path = root / "feedback.json"
             feedback_path.write_text(json.dumps({"schema_version": 1, "feedback": incoming}, ensure_ascii=False), encoding="utf-8")
-            radar.command_replace_feedback(type("Args", (), {"profile": str(profile_path), "feedback": str(feedback_path), "archive": str(archive_path)})())
+            radar.command_replace_feedback(type("Args", (), {"profile": str(profile_path), "feedback": str(feedback_path), "archive": str(archive_path), "confirm": True})())
             archived = radar.validate_profile(json.loads(archive_path.read_text(encoding="utf-8")))
             corrected = radar.validate_profile(json.loads(profile_path.read_text(encoding="utf-8")))
             self.assertEqual(original, archived)
@@ -203,13 +223,7 @@ class RadarFeedbackTests(unittest.TestCase):
             profile_path = root / "profile.json"
             profile = radar.merge_feedback(self.profile(), radar.validate_feedback_batch({
                 "schema_version": 1,
-                "feedback": [{
-                    "candidate_id": "C001",
-                    "title": "Graph Memory Example",
-                    "label": "not_useful_now",
-                    "reason": "当前不需要。",
-                    "tags": ["截图优先"],
-                }],
+                "feedback": self.review_feedback(["not_useful_now"], ["当前不需要截图优先。"], [["截图优先"]]),
             }))
             profile["derived_guidance"]["avoid_tags"] = ["截图优先"]
             profile_path.write_text(json.dumps(profile, ensure_ascii=False), encoding="utf-8")
@@ -223,13 +237,11 @@ class RadarFeedbackTests(unittest.TestCase):
             root = Path(directory)
             profile_path = root / "profile.json"
             candidates_path = root / "candidates.json"
-            feedback_path = root / "feedback.json"
             review_path = root / "review.md"
             candidates_path.write_text(json.dumps(self.candidates(), ensure_ascii=False), encoding="utf-8")
-            feedback_path.write_text(json.dumps(self.feedback(), ensure_ascii=False), encoding="utf-8")
             script = Path(radar.__file__).resolve()
             init = subprocess.run(
-                [sys.executable, str(script), "init", "--output", str(profile_path), "--project-name", "ExampleProject", "--description", "中文研究雷达"],
+                [sys.executable, str(script), "init", "--output", str(profile_path), "--project-id", "test-project", "--project-name", "ExampleProject", "--description", "中文研究雷达"],
                 capture_output=True,
                 text=True,
                 check=False,
@@ -242,11 +254,12 @@ class RadarFeedbackTests(unittest.TestCase):
                 check=False,
             )
             self.assertEqual(0, review.returncode, review.stderr)
-            review_text = review_path.read_text(encoding="utf-8").replace("你的标注：`待填写`", "你的标注：`可借鉴机制`").replace("你的理由：`待填写`", "你的理由：`能迁移`")
+            review_text = review_path.read_text(encoding="utf-8").replace("你的标注：`待填写`", "你的标注：可借鉴机制").replace("你的理由：`待填写`", "你的理由：可审计机制能迁移")
+            review_text = review_text.replace("你的偏好范围：`待填写`", "你的偏好范围：维度").replace("你的确认维度：`待填写`", "你的确认维度：可审计")
             review_path.write_text(review_text, encoding="utf-8")
             proposal_path = root / "proposal.json"
             proposal = subprocess.run(
-                [sys.executable, str(script), "extract-review", "--review", str(review_path), "--candidates", str(candidates_path), "--output", str(proposal_path)],
+                [sys.executable, str(script), "extract-review", "--review", str(review_path), "--candidates", str(candidates_path), "--project-id", "test-project", "--output", str(proposal_path)],
                 capture_output=True,
                 text=True,
                 check=False,
@@ -254,7 +267,7 @@ class RadarFeedbackTests(unittest.TestCase):
             self.assertEqual(0, proposal.returncode, proposal.stderr)
             self.assertEqual(2, len(json.loads(proposal_path.read_text(encoding="utf-8"))["feedback"]))
             recorded = subprocess.run(
-                [sys.executable, str(script), "record-feedback", "--profile", str(profile_path), "--feedback", str(feedback_path)],
+                [sys.executable, str(script), "record-feedback", "--profile", str(profile_path), "--feedback", str(proposal_path), "--confirm"],
                 capture_output=True,
                 text=True,
                 check=False,
@@ -262,6 +275,130 @@ class RadarFeedbackTests(unittest.TestCase):
             self.assertEqual(0, recorded.returncode, recorded.stderr)
             self.assertIn("优先看", review_path.read_text(encoding="utf-8"))
             self.assertEqual(2, len(radar.validate_profile(json.loads(profile_path.read_text(encoding="utf-8")))["feedback"]))
+            saved = json.loads(profile_path.read_text(encoding="utf-8"))
+            self.assertEqual(["可审计"], saved["derived_guidance"]["approved_tags"])
+            self.assertTrue(all(radar.feedback_issue(item, "test-project") is None for item in saved["feedback"]))
+            shown = self.cli("show-guidance", "--profile", str(profile_path))
+            self.assertEqual(0, shown.returncode, shown.stdout + shown.stderr)
+            self.assertIn("已确认偏好：可审计", shown.stdout)
+
+    def test_unknown_unquoted_label_is_retained_as_uncertain(self):
+        item = self.review_feedback(["说不上来，先观察"], ["图记忆或许有用"], [["图记忆"]])[0]
+        self.assertEqual("uncertain", item["label"])
+        self.assertEqual("说不上来，先观察", item["evidence"]["raw_label"])
+        self.assertIsNone(radar.feedback_issue(item, "test-project"))
+        guidance = radar.derive_guidance([item], "test-project")
+        self.assertEqual([], guidance["approved_tags"])
+        self.assertEqual([], guidance["avoid_tags"])
+
+    def test_reason_without_label_is_not_silently_skipped(self):
+        with self.assertRaisesRegex(ValueError, "C001.*缺少标注"):
+            self.review_feedback(["待填写"], ["这个有内容的理由必须保留"])
+
+    def test_forged_dimension_confirmation_is_rejected(self):
+        item = self.review_feedback(["夯"], ["可审计值得借鉴"])[0]
+        item["evidence"].update(scope="dimension", confirmed_terms=["可审计"],
+                                dimension_confirmation={"raw_scope": "维度", "raw_terms": "可审计"})
+        self.assertEqual("original_dimension_confirmation_mismatch", radar.feedback_issue(item, "test-project"))
+
+    def test_negated_substring_cannot_become_positive_dimension(self):
+        for reason, term in [("不是喜欢图记忆，而是可审计有用。", "图记忆"),
+                             ("不要截图优先。", "截图"), ("not useful graph memory", "graph memory")]:
+            with self.subTest(reason=reason):
+                item = self.review_feedback(["夯"], [reason], [[term]])[0]
+                self.assertIn("positive_term_negated_or_uncertain", radar.feedback_issue(item, "test-project"))
+                self.assertEqual([], radar.derive_guidance([item], "test-project")["approved_tags"])
+        good = self.review_feedback(["夯"], ["不是喜欢图记忆，而是可审计有用。"], [["可审计"]])[0]
+        self.assertEqual(["可审计"], radar.derive_guidance([good], "test-project")["approved_tags"])
+
+    def test_dimension_needs_original_reason_and_explicit_scope(self):
+        item = self.review_feedback(["夯"], ["只有图记忆值得借鉴"], [["可审计"]])[0]
+        self.assertEqual("preference_terms_not_grounded_in_user_reason", radar.feedback_issue(item, "test-project"))
+        valid = self.review_feedback(["夯"], ["可审计值得借鉴"], [["可审计"]])[0]
+        del valid["evidence"]["dimension_confirmation"]
+        self.assertEqual("missing_or_mismatched_dimension_confirmation", radar.feedback_issue(valid, "test-project"))
+        with self.assertRaisesRegex(ValueError, "偏好范围"):
+            radar.review_dimensions({"偏好范围": "随便", "确认维度": "可审计"})
+        with self.assertRaises(ValueError):
+            radar.review_dimensions({"偏好范围": "当前候选", "确认维度": "可审计"})
+
+    def test_candidate_tags_do_not_expand_without_user_dimensions(self):
+        item = self.review_feedback(["夯"], ["整体有用"])[0]
+        self.assertEqual("candidate", item["evidence"]["scope"])
+        self.assertEqual([], radar.derive_guidance([item], "test-project")["approved_tags"])
+
+    def test_original_evidence_identity_and_hash_tampering_is_rejected(self):
+        item = self.feedback()["feedback"][0]
+        for field, value in [("project_id", "other"), ("candidate_id", "C999"),
+                             ("candidate_title", "Other title"), ("raw_label", "NPC"),
+                             ("raw_reason", "伪造理由"), ("verified_at", "invalid")]:
+            changed = json.loads(json.dumps(item))
+            changed["evidence"][field] = value
+            with self.subTest(field=field):
+                self.assertIsNotNone(radar.feedback_issue(changed, "test-project"))
+        for field, value in [("url", "https://example.com/other"), ("version", "v2.0.0"), ("version", "main")]:
+            changed = json.loads(json.dumps(item))
+            changed["evidence"]["source_identity"][field] = value
+            self.assertIsNotNone(radar.feedback_issue(changed, "test-project"))
+        path = Path(item["evidence"]["source_ref"]["path"])
+        path.write_text(path.read_text(encoding="utf-8") + "\nchanged", encoding="utf-8")
+        self.assertEqual("original_input_changed", radar.feedback_issue(item, "test-project"))
+
+    def test_duplicate_original_field_and_candidate_are_rejected(self):
+        item = self.review_feedback(["夯"], ["可审计有用"])[0]
+        original = Path(item["evidence"]["source_ref"]["path"]).read_text(encoding="utf-8")
+        for text in [original + "你的标注：NPC\n", original + original]:
+            with self.subTest(text=text):
+                with self.assertRaisesRegex(ValueError, "duplicate"):
+                    radar.extract_review_feedback(text, radar.validate_candidates(self.candidates()))
+
+    def test_legacy_schema_is_readable_but_never_active_without_evidence(self):
+        legacy = {key: value for key, value in self.feedback()["feedback"][0].items() if key != "evidence"}
+        parsed = radar.validate_feedback_batch({"schema_version": 1, "feedback": [legacy]})
+        self.assertNotIn("evidence", parsed[0])
+        self.assertEqual("legacy_or_missing_user_evidence", radar.feedback_issue(parsed[0], "test-project"))
+        profile = self.profile()
+        profile["feedback"] = [dict(legacy, feedback_id="old-1", created_at=radar.now_iso())]
+        del profile["project"]["id"]
+        profile["derived_guidance"]["approved_tags"] = ["不可相信的旧缓存"]
+        self.assertEqual(profile, radar.validate_profile(profile))
+        self.assertEqual([], radar.derive_guidance(profile["feedback"])["approved_tags"])
+        with self.assertRaisesRegex(ValueError, "legacy_or_missing_user_evidence"):
+            radar.merge_feedback(self.profile(), parsed)
+
+    def test_raw_labels_ordinals_and_old_pinned_sources_are_preserved(self):
+        for raw, ordinal in [("夯", 5), ("顶级", 4), ("人上人", 3), ("NPC", 2), ("拉完了", 1)]:
+            item = self.review_feedback([raw], ["可审计  机制"])[0]
+            self.assertEqual(raw, item["evidence"]["raw_label"])
+            self.assertEqual(ordinal, item["evidence"]["ordinal"])
+            self.assertEqual("可审计  机制", item["evidence"]["raw_reason"])
+            self.assertIsNone(radar.feedback_issue(item, "test-project"))
+        candidate = radar.validate_candidates(self.candidates())[0]
+        candidate.update(source_version="2011-published-edition", verified_at="2012-01-01T00:00:00Z")
+        old = self.review_feedback(["可借鉴机制"], ["可审计有用"], candidates=[candidate])[0]
+        self.assertIsNone(radar.feedback_issue(old, "test-project"))
+
+    def test_cli_requires_confirmation_and_rejects_mixed_batch_atomically(self):
+        profile_path, batch_path = self.root / "profile.json", self.root / "batch.json"
+        before = json.dumps(self.profile(), ensure_ascii=False)
+        profile_path.write_text(before, encoding="utf-8")
+        batch = self.feedback()
+        batch_path.write_text(json.dumps(batch, ensure_ascii=False), encoding="utf-8")
+        missing_confirmation = self.cli("record-feedback", "--profile", str(profile_path), "--feedback", str(batch_path))
+        self.assertEqual(1, missing_confirmation.returncode)
+        self.assertIn("--confirm", missing_confirmation.stdout)
+        batch["feedback"][1]["evidence"]["source_identity"]["version"] = "unverified"
+        batch_path.write_text(json.dumps(batch, ensure_ascii=False), encoding="utf-8")
+        archive = self.root / "archive.json"
+        for command, extra in [("record-feedback", []), ("replace-feedback", ["--archive", str(archive)])]:
+            result = self.cli(command, "--profile", str(profile_path), "--feedback", str(batch_path), "--confirm", *extra)
+            self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+            self.assertIn("C002", result.stdout)
+            self.assertIn("unpinned_source_version", result.stdout)
+            self.assertIn("整批未写入", result.stdout)
+            self.assertIn("重新 extract-review", result.stdout)
+            self.assertEqual(before, profile_path.read_text(encoding="utf-8"))
+            self.assertFalse(archive.exists())
 
 
 if __name__ == "__main__":

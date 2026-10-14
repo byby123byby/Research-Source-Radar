@@ -692,13 +692,13 @@ class ResearchContractTests(unittest.TestCase):
             "LICENSE",
             "RELEASE_COMPLETENESS.json",
             "references/domain-profiles.md",
-            "references/discovery-protocol.md",
+            "references/discovery-core-v3.md",
             "references/seed-to-neighbor-discovery.md",
             "references/user-aligned-discovery.md",
             "references/active-discovery-loop.md",
             "references/research-impact-and-preference.md",
             "references/github-hot-similar-discovery.md",
-            "references/source-ecosystems-and-time-windows.md",
+            "references/relevance-first-retrieval.md",
             "references/release-requirements.md",
             "references/contract-schema.md",
             "references/portability.md",
@@ -855,35 +855,42 @@ class ResearchContractTests(unittest.TestCase):
 
     def test_source_ecosystems_and_time_windows_are_explicit_and_bounded(self):
         skill_text = skill_documentation()
-        reference = (SKILL_ROOT / "references/source-ecosystems-and-time-windows.md").read_text(encoding="utf-8")
-        self.assertIn("source-ecosystems-and-time-windows.md", skill_text)
+        core = (SKILL_ROOT / "references/discovery-core-v3.md").read_text(encoding="utf-8")
+        profiles = (SKILL_ROOT / "references/domain-profiles.md").read_text(encoding="utf-8")
+        self.assertIn("discovery-core-v3.md", skill_text)
+        self.assertIn("domain-profiles.md", skill_text)
+        for marker in ("Humanities, Languages, And Cultural Heritage", "Social Science",
+                       "Business, Management, And Operations", "Financial Quantitative Finance"):
+            self.assertIn(marker, profiles)
+        for marker in ("Select only ecosystems relevant to the domain", "Social science/business",
+                       "Humanities", "Attention signals are discovery-only",
+                       "unavailable adapter", "reported coverage gap"):
+            self.assertIn(marker, core)
         for marker in (
-            "Humanities and digital humanities",
-            "Economics and social science",
+            "rapid_attention",
+            "recent_activity",
             "recent_6m",
             "foundational",
-            "Recall protection rule",
             "relevant_but_not_hot",
-            "Trend signals may",
-            "evidence_policy: discovery_only",
-            "Do not search every platform by default",
             "hot_but_transfer_only",
-            "unavailable or inaccessible",
+            "exact cutoff and observation dates",
         ):
-            self.assertIn(marker, reference)
+            self.assertIn(marker, skill_text)
 
     def test_trend_route_is_documented_as_a_sidecar_not_a_recall_replacement(self):
         skill_text = skill_documentation()
-        protocol = (SKILL_ROOT / "references/discovery-protocol.md").read_text(encoding="utf-8")
-        documents = [skill_text, protocol]
+        protocol = (SKILL_ROOT / "references/discovery-core-v3.md").read_text(encoding="utf-8")
+        documents = [skill_text]
         readme_path = SKILL_ROOT / "README.md"
         if readme_path.exists():
             documents.append(readme_path.read_text(encoding="utf-8"))
         for text in documents:
             self.assertIn("sidecar", text)
-        self.assertIn("relevant_but_not_hot", protocol)
+        self.assertIn("relevant_but_not_hot", skill_text)
         self.assertIn("core relevance routes", skill_text)
-        self.assertIn("quiet source", protocol)
+        self.assertIn("quiet source", skill_text)
+        self.assertIn("Attention signals are discovery-only", protocol)
+        self.assertIn("freshness or attention as a tie-breaker", protocol)
 
     def test_neighbor_fusion_separates_provenance_from_relevance_and_opaque_scores(self):
         skill_text = skill_documentation()
